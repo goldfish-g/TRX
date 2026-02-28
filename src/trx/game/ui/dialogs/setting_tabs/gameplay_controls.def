@@ -1,3 +1,4 @@
+X_UI_CFG(input.enable_touch_controls,       .custom_handler = { .is_visible = UI_Settings_TouchControls_IsAvailable })
 X_UI_CFG(input.enable_responsive_passport)
 X_UI_CFG(gameplay.enable_walk_to_items)
 X_UI_CFG(input.enable_tr3_sidesteps)
