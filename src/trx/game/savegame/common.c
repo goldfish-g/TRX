@@ -792,6 +792,9 @@ bool Savegame_Save(const int32_t slot_idx)
         if (was_slot_empty) {
             m_SavedGames++;
         }
+#ifdef EMSCRIPTEN_BUILD
+        Shell_PersistSavesToIDBFS();
+#endif
     } else {
         m_SaveCounter--;
     }
