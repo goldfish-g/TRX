@@ -584,6 +584,8 @@
         "SETTING_ENABLE_TIMER_IN_INVENTORY_DESCRIPTION": "Makes the in-game timer work even while the game is showing the inventory.",
         "SETTING_ENABLE_TOTAL_STATS": "Final statistics screen",
         "SETTING_ENABLE_TOTAL_STATS_DESCRIPTION": "Enables a total game statistics screen that plays after the credits.",
+        "SETTING_ENABLE_TOUCH_CONTROLS": "Touch controls",
+        "SETTING_ENABLE_TOUCH_CONTROLS_DESCRIPTION": "Shows on-screen touch buttons for mobile devices.",
         "SETTING_ENABLE_TR2_JUMPING": "Responsive jumping",
         "SETTING_ENABLE_TR2_JUMPING_DESCRIPTION": "Allows Lara to jump at any point while running.",
         "SETTING_ENABLE_TR2_SWIMMING": "Smooth swimming",
