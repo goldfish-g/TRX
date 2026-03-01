@@ -1,5 +1,6 @@
 #include <trx/config.h>
 #include <trx/core/enum_map.h>
+#include <trx/core/filesystem.h>
 #include <trx/core/log.h>
 #include <trx/core/memory.h>
 #include <trx/core/strings.h>
@@ -79,11 +80,11 @@ EM_JS(void, js_show_start_gate, (void), {
         }
         requestAnimationFrame(poll);
     })();
-});
+})
 
 EM_JS(int, js_is_start_gate_dismissed, (void), {
     return Module._startGateDismissed ? 1 : 0;
-});
+})
 
 // --- IDBFS persistence ---
 
@@ -94,7 +95,7 @@ EM_JS(void, js_init_idbfs, (const char *mount_path), {
     FS.mount(IDBFS, {}, path);
     try { FS.mkdir(path + '/saves'); } catch(e) {}
     try { FS.mkdir(path + '/cfg'); } catch(e) {}
-});
+})
 
 EM_JS(void, js_start_idbfs_sync_from_db, (void), {
     Module._idbfsSyncDone = false;
@@ -102,18 +103,18 @@ EM_JS(void, js_start_idbfs_sync_from_db, (void), {
         if (err) console.error('[IDBFS] sync from DB error:', err);
         Module._idbfsSyncDone = true;
     });
-});
+})
 
 EM_JS(int, js_is_idbfs_sync_done, (void), {
     return Module._idbfsSyncDone ? 1 : 0;
-});
+})
 
 EM_JS(void, js_restore_config, (const char *src, const char *dst), {
     try {
         var data = FS.readFile(UTF8ToString(src));
         FS.writeFile(UTF8ToString(dst), data);
     } catch(e) { /* no persisted config yet */ }
-});
+})
 
 EM_JS(void, js_persist_file_and_sync, (const char *src, const char *dst), {
     var d = UTF8ToString(dst);
@@ -124,13 +125,24 @@ EM_JS(void, js_persist_file_and_sync, (const char *src, const char *dst), {
     FS.syncfs(false, function(err) {
         if (err) console.error('[IDBFS] sync error:', err);
     });
-});
+})
 
 EM_JS(void, js_sync_idbfs_to_db, (void), {
     FS.syncfs(false, function(err) {
         if (err) console.error('[IDBFS] sync error:', err);
     });
-});
+})
+
+EM_JS(void, js_set_touch_controls_visible, (int visible), {
+    if (Module.setTouchControlsVisible) {
+        Module.setTouchControlsVisible(visible);
+    }
+})
+
+EM_JS(int, js_has_touch_support, (void), {
+    return navigator.maxTouchPoints > 0 ? 1 : 0;
+})
+
 // clang-format on
 
 // setenv is POSIX but not declared under strict C standard modes.
@@ -196,10 +208,15 @@ static SDL_Window *m_Window = nullptr;
 
 static void M_CreateGameWindow(void)
 {
+    uint32_t window_flags =
+        SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL;
+#ifdef EMSCRIPTEN_BUILD
+    window_flags |= SDL_WINDOW_ALLOW_HIGHDPI;
+#endif
+
     m_Window = SDL_CreateWindow(
         "TRX", g_Config.window.x, g_Config.window.y, g_Config.window.width,
-        g_Config.window.height,
-        SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
+        g_Config.window.height, window_flags);
 
     if (m_Window == nullptr) {
         Shell_ExitSystemFmt("Failed to create SDL window: %s", SDL_GetError());
@@ -400,8 +417,16 @@ static void M_PrepareSystem(void)
         if (engine_config_path == nullptr) {
             Shell_ExitSystem("Failed to resolve engine config path");
         }
+#ifdef EMSCRIPTEN_BUILD
+        const bool first_run = !File_Exists(engine_config_path);
+#endif
         Config_Read(engine_config_path, Shell_GetGameFlowPath(s->args->mod));
         Memory_FreePointer(&engine_config_path);
+#ifdef EMSCRIPTEN_BUILD
+        if (first_run && js_has_touch_support()) {
+            g_Config.input.enable_touch_controls = true;
+        }
+#endif
 
         if (s->args->test_record_path != nullptr) {
             TestRecorder_Open(
@@ -503,6 +528,7 @@ int32_t Shell_Main(const SHELL_ARGS *const args)
     WEBGL_LOG("[WEBGL] Shell_Main: max stats done, starting frontend...");
 #ifdef EMSCRIPTEN_BUILD
     M_WaitForUserInput();
+    js_set_touch_controls_visible(g_Config.input.enable_touch_controls);
 #endif
     LOG_INFO("[WEBGL] Starting frontend sequence...");
     GF_COMMAND gf_cmd = GF_DoFrontendSequence();
