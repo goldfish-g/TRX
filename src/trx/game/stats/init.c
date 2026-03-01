@@ -7,6 +7,7 @@
 #include <trx/core/log.h>
 #include <trx/core/memory.h>
 #include <trx/core/virtual_file.h>
+#include <trx/core/webgl_log.h>
 #include <trx/debug.h>
 #include <trx/game/creature.h>
 #include <trx/game/game_buf.h>
@@ -21,13 +22,6 @@
 #include <trx/game/stats.h>
 
 #include <string.h>
-
-#ifdef EMSCRIPTEN_BUILD
-    #include <emscripten.h>
-    #define WEBGL_LOG(...) emscripten_log(0x02, __VA_ARGS__)
-#else
-    #define WEBGL_LOG(...) ((void)0)
-#endif
 
 #define M_CACHE_VERSION 4
 #define M_CACHE_FILENAME "max_stats.cache.json"
