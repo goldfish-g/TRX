@@ -208,10 +208,15 @@ static SDL_Window *m_Window = nullptr;
 
 static void M_CreateGameWindow(void)
 {
+    uint32_t window_flags =
+        SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL;
+#ifdef EMSCRIPTEN_BUILD
+    window_flags |= SDL_WINDOW_ALLOW_HIGHDPI;
+#endif
+
     m_Window = SDL_CreateWindow(
         "TRX", g_Config.window.x, g_Config.window.y, g_Config.window.width,
-        g_Config.window.height,
-        SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
+        g_Config.window.height, window_flags);
 
     if (m_Window == nullptr) {
         Shell_ExitSystemFmt("Failed to create SDL window: %s", SDL_GetError());
