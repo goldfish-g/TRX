@@ -2,6 +2,7 @@
 
 #include <trx/config.h>
 #include <trx/core/benchmark.h>
+#include <trx/core/webgl_log.h>
 #include <trx/game/clock.h>
 #include <trx/game/console/common.h>
 #include <trx/game/fader.h>
@@ -18,15 +19,9 @@
 #include <trx/game/ui.h>
 #include <trx/gl/context.h>
 #include <trx/gl/track.h>
+#include <trx/platform/yield.h>
 
 #include <stdio.h>
-
-#ifdef EMSCRIPTEN_BUILD
-    #include <emscripten.h>
-    #define WEBGL_LOG(...) emscripten_log(0x02, __VA_ARGS__)
-#else
-    #define WEBGL_LOG(...) ((void)0)
-#endif
 
 #define M_MAX_PHASES 10
 
@@ -266,9 +261,7 @@ GF_COMMAND PhaseExecutor_Run(PHASE *const phase)
         }
         s_FrameLog++;
         int32_t frame = 0;
-#ifdef EMSCRIPTEN_BUILD
         int no_wait_count = 0;
-#endif
         while (true) {
             const PHASE_CONTROL control = M_Control(phase);
             if (control.action == PHASE_ACTION_END) {
@@ -287,13 +280,12 @@ GF_COMMAND PhaseExecutor_Run(PHASE *const phase)
                 }
                 goto finish;
             } else if (control.action == PHASE_ACTION_NO_WAIT) {
-#ifdef EMSCRIPTEN_BUILD
-                // Prevent infinite spin without yielding to browser
+                // Prevent infinite spin without yielding to browser.
+                // On desktop this is a no-op.
                 if (++no_wait_count > 1000) {
-                    emscripten_sleep(0);
+                    Platform_Yield(0);
                     no_wait_count = 0;
                 }
-#endif
                 continue;
             }
 

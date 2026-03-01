@@ -7,6 +7,7 @@
 #include <trx/gl/context.h>
 #include <trx/gl/enum.h>
 #include <trx/gl/fbo.h>
+#include <trx/gl/gl_webgl_compat.h>
 #include <trx/gl/program.h>
 #include <trx/gl/sampler.h>
 #include <trx/gl/screenshot.h>
@@ -14,11 +15,6 @@
 #include <trx/gl/utils.h>
 #include <trx/gl/vertex_array.h>
 
-#ifdef EMSCRIPTEN_BUILD
-    #include <trx/gl/gl_webgl_compat.h>
-#else
-    #include <GL/glew.h>
-#endif
 #include <SDL2/SDL_video.h>
 #include <stdint.h>
 
@@ -66,11 +62,8 @@ static void M_Render(TRX_GL_RENDERER *renderer)
 
     TRX_GL_FBO_Unbind();
 
-#ifndef EMSCRIPTEN_BUILD
-    // glPolygonMode does not exist in GL ES / WebGL.
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     TRX_GL_CheckError();
-#endif
 
     TRX_GL_Program_Bind(&p->program);
     TRX_GL_Buffer_Bind(&p->buffer);

@@ -8,6 +8,7 @@
 #include <trx/core/memory.h>
 #include <trx/core/strings.h>
 #include <trx/core/virtual_file.h>
+#include <trx/core/webgl_log.h>
 #include <trx/debug.h>
 #include <trx/game/creature.h>
 #include <trx/game/game_buf.h>
@@ -19,16 +20,10 @@
 #include <trx/game/rooms.h>
 #include <trx/game/shell.h>
 #include <trx/game/stats.h>
+#include <trx/platform/yield.h>
 
 #include <stdlib.h>
 #include <string.h>
-
-#ifdef EMSCRIPTEN_BUILD
-    #include <emscripten.h>
-    #define WEBGL_LOG(...) emscripten_log(0x02, __VA_ARGS__)
-#else
-    #define WEBGL_LOG(...) ((void)0)
-#endif
 
 #define M_FNV_1A_BASE 14695981039346656037ULL
 #define M_FNV_1A_PRIME 1099511628211ULL
@@ -382,11 +377,9 @@ void Stats_CalculateMaxStats(void)
         WEBGL_LOG(
             "[WEBGL] Stats: level[%d] type=%d path=%s — yielding...", i,
             level->type, level->path ? level->path : "(null)");
-#ifdef EMSCRIPTEN_BUILD
         // Yield to the browser between level scans so the page stays
-        // responsive while scanning all level files.
-        emscripten_sleep(0);
-#endif
+        // responsive while scanning all level files. No-op on desktop.
+        Platform_Yield(0);
         WEBGL_LOG("[WEBGL] Stats: level[%d] — resumed from yield", i);
 
         VFILE *const file = VFile_CreateFromPath(level->path);

@@ -3,6 +3,7 @@
 #include <trx/core/filesystem.h>
 #include <trx/core/log.h>
 #include <trx/core/memory.h>
+#include <trx/core/webgl_log.h>
 #include <trx/game/inject.h>
 #include <trx/game/items/carrier.h>
 #include <trx/game/level.h>
@@ -13,14 +14,11 @@
 #include <trx/game/shell/paths.h>
 #include <trx/game/sound.h>
 #include <trx/game/stats.h>
+#include <trx/platform/yield.h>
 #include <trx/version.h>
 
 #include <stdlib.h>
 #include <string.h>
-
-#ifdef EMSCRIPTEN_BUILD
-    #include <emscripten.h>
-#endif
 
 typedef struct {
     int32_t game_index;
@@ -68,13 +66,11 @@ static void M_InitialiseSamplesFromFile(
 
     for (int32_t i = 0, current_sample = 0; current_sample < sample_count;
          i++) {
-#ifdef EMSCRIPTEN_BUILD
         // Yield periodically during sample loading (every 10 samples)
-        // to keep the browser responsive when loading many audio samples.
+        // to keep the browser responsive. No-op on desktop.
         if (i > 0 && i % 10 == 0) {
-            emscripten_sleep(0);
+            Platform_Yield(0);
         }
-#endif
 
         uint32_t header[11] = {};
         File_ReadData(fp, header, 11 * sizeof(uint32_t));
@@ -199,18 +195,13 @@ void Level_Pipeline_Load(const GF_LEVEL *const level)
     LOG_INFO("%d (%s)", level->num, level->path);
     BENCHMARK benchmark = Benchmark_Start();
 
-#ifdef EMSCRIPTEN_BUILD
     // Yield to the browser before heavy file I/O and parsing to prevent
-    // the event loop from being starved. Level loading can take 50-200ms
-    // for large level files, which would freeze the browser without yielding.
-    emscripten_log(
-        0x02,
+    // the event loop from being starved. No-op on desktop.
+    WEBGL_LOG(
         "[WEBGL] Level_Pipeline_Load: yielding before load (level=%d, path=%s)",
         level->num, level->path ? level->path : "(null)");
-    emscripten_sleep(0);
-    emscripten_log(
-        0x02, "[WEBGL] Level_Pipeline_Load: resumed, loading file...");
-#endif
+    Platform_Yield(0);
+    WEBGL_LOG("[WEBGL] Level_Pipeline_Load: resumed, loading file...");
 
     Inject_InitLevel(level, INJECTION_MODE_FULL);
     const LEVEL_FORMAT_LOADER *const loader = Level_Format_LoadFromFile(level);
