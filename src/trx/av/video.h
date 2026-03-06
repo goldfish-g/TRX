@@ -1,8 +1,7 @@
 #pragma once
 
-#include <stdint.h>
-
 #include <libavutil/pixfmt.h>
+#include <stdint.h>
 
 typedef struct {
     const char *path;
