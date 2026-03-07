@@ -60,3 +60,4 @@ tools/installer/TR2X_Installer/Resources/release.zip
 
 # Local planning docs (not for upstream)
 /WEBGL_MERGE_PLAN.md
+.claude
