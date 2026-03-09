@@ -8,6 +8,7 @@
 #include <trx/core/virtual_file.h>
 #include <trx/core/webgl_log.h>
 #include <trx/debug.h>
+#include <trx/game/clock.h>
 #include <trx/game/creature.h>
 #include <trx/game/game_buf.h>
 #include <trx/game/game_flow.h>
@@ -19,7 +20,6 @@
 #include <trx/game/lua.h>
 #include <trx/game/rooms.h>
 #include <trx/game/stats.h>
-#include <trx/platform/yield.h>
 
 #include <string.h>
 
@@ -285,7 +285,7 @@ void Stats_CalculateMaxStats(void)
 
         // Yield to the browser between level scans so the page stays
         // responsive while scanning all level files. No-op on desktop.
-        Platform_Yield(0);
+        Clock_Delay(0);
 
         VFILE *const file = VFile_CreateFromPath(level->path);
         if (file == nullptr) {
