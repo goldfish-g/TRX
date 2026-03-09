@@ -59,6 +59,7 @@ Showcase: https://youtu.be/8SavYv2SawI
 - added an option to let Lara stay crouched without holding the button (Gameplay → Controls → Toggle crouch) (#5006)
 - added an option to let Lara keep sprinting without holding the button (Gameplay → Controls → Toggle sprint) (#5006)
 - added three additional outfits for Lara
+- added WebGL/Emscripten build support — play TR1 and TR2 in the browser
 - added a new console command, `/mod {name}`, to switch between installed game/mod packs without relaunching
 - added a new option in the New Game dialog, "Switch Game", to switch between installed game/mod packs without relaunching
 - added experimental support for config presets (Gameplay Options → Presets)
