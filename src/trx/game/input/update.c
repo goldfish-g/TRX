@@ -4,6 +4,7 @@
 #include <trx/game/input/backends/base.h>
 #include <trx/game/input/backends/controller.h>
 #include <trx/game/input/backends/keyboard.h>
+#include <trx/game/input/backends/touch.h>
 #include <trx/game/input/common.h>
 #include <trx/game/lara.h>
 #include <trx/version.h>
@@ -26,6 +27,7 @@ void Input_Update(void)
         &g_Input, &g_Input_Keyboard, g_Config.input.keyboard_layout);
     M_UpdateFromBackend(
         &g_Input, &g_Input_Controller, g_Config.input.controller_layout);
+    M_UpdateFromBackend(&g_Input, &g_Input_Touch, INPUT_LAYOUT_DEFAULT);
 
     // Suppress roles whose bindings are subsets of longer active combos.
     g_Input_Keyboard.resolve_combos(g_Config.input.keyboard_layout, &g_Input);
