@@ -6,6 +6,7 @@
 #include <trx/game/game_strings/entries.h>
 #include <trx/game/input/backends/controller.h>
 #include <trx/game/input/backends/keyboard.h>
+#include <trx/game/input/backends/touch.h>
 #include <trx/version.h>
 
 #include <SDL2/SDL_keyboard.h>
@@ -90,6 +91,8 @@ static INPUT_BACKEND_IMPL *M_GetBackend(const INPUT_BACKEND backend)
         return &g_Input_Keyboard;
     case INPUT_BACKEND_CONTROLLER:
         return &g_Input_Controller;
+    case INPUT_BACKEND_TOUCH:
+        return &g_Input_Touch;
     default:
         return nullptr;
     }
@@ -137,6 +140,9 @@ void Input_Init(void)
     if (g_Input_Controller.init != nullptr) {
         g_Input_Controller.init();
     }
+    if (g_Input_Touch.init != nullptr) {
+        g_Input_Touch.init();
+    }
 }
 
 void Input_Shutdown(void)
@@ -147,6 +153,9 @@ void Input_Shutdown(void)
     if (g_Input_Controller.shutdown != nullptr) {
         g_Input_Controller.shutdown();
     }
+    if (g_Input_Touch.shutdown != nullptr) {
+        g_Input_Touch.shutdown();
+    }
 }
 
 void Input_Discover(void)
@@ -156,6 +165,9 @@ void Input_Discover(void)
     }
     if (g_Input_Controller.discover != nullptr) {
         g_Input_Controller.discover();
+    }
+    if (g_Input_Touch.discover != nullptr) {
+        g_Input_Touch.discover();
     }
 }
 
@@ -256,6 +268,9 @@ void Input_ProcessEvent(const SDL_Event *event)
     }
     if (g_Input_Controller.process_event != nullptr) {
         g_Input_Controller.process_event(event);
+    }
+    if (g_Input_Touch.process_event != nullptr) {
+        g_Input_Touch.process_event(event);
     }
 }
 
