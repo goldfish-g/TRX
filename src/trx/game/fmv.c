@@ -4,6 +4,7 @@
 #include <trx/av/video.h>
 #include <trx/av/video_platform.h>
 #include <trx/config.h>
+#include <trx/core/filesystem.h>
 #include <trx/core/log.h>
 #include <trx/core/memory.h>
 #include <trx/core/strings.h>
@@ -168,8 +169,6 @@ static bool M_Play(const char *const file_name)
     Video_SetAudioEnabled(video, false);
 
     const int32_t audio_id = M_OpenAudioStream(file_name);
-
-    const int32_t audio_id = Audio_Stream_CreateFromFile(file_name);
 
     g_OldInputDB = g_Input;
     Video_Start(video);
