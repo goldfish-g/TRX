@@ -1,8 +1,8 @@
 // Game data manager for TRX WebGL builds.
 //
-// Handles uploading, extracting, and persisting user game files in IndexedDB
-// so they only need to be provided once.  On return visits the data is loaded
-// from IndexedDB directly into the Emscripten virtual filesystem.
+// Handles uploading, extracting, and mapping user game files into the
+// games/<mod>/ VFS directory structure.  Works with the ProfileManager
+// to persist data in IndexedDB per-profile.
 //
 // Depends on: fflate (UMD, expected as global `fflate`)
 //             Emscripten FS  (global `FS`)
@@ -15,8 +15,6 @@
 // ---------------------------------------------------------------------------
 
 var GameDataManager = (function () {
-    var DB_VERSION = 1;
-
     // Game file extensions we care about, grouped by destination directory.
     var LEVEL_EXTS = ['.phd', '.tr2', '.psx', '.tub'];
     var MUSIC_EXTS = ['.flac', '.ogg', '.mp3', '.wav'];
@@ -28,9 +26,6 @@ var GameDataManager = (function () {
     // Remaster-only extensions to skip (textures, models, palettes, etc.).
     var REMASTER_SKIP_EXTS = ['.trg', '.dds', '.trm', '.pdp', '.map', '.tex'];
 
-    // All extensions considered "game data" (for preload dump detection).
-    var ALL_GAME_EXTS = LEVEL_EXTS.concat(MUSIC_EXTS, SFX_EXTS, FMV_EXTS, AUDIO_EXTS);
-
     // Known directory names (case-insensitive) that indicate the game root.
     var ROOT_MARKERS = ['data', 'fmv', 'music', 'audio', 'cuts', 'tracks', 'sfx'];
 
@@ -38,228 +33,19 @@ var GameDataManager = (function () {
     // Constructor
     // -----------------------------------------------------------------------
 
-    function GameDataManager(gameId) {
-        this.gameId = gameId;  // "tr1", "tr2", or "tr3"
-        this._dbName = 'trx-gamedata-' + gameId;
-        this._db = null;
+    function GameDataManager(modId) {
+        this.modId = modId;  // "tr1", "tr1-ub", "tr2", "tr2-gm", "tr3", "tr3-la", etc.
     }
-
-    // -----------------------------------------------------------------------
-    // IndexedDB helpers
-    // -----------------------------------------------------------------------
-
-    GameDataManager.prototype._openDB = function () {
-        var self = this;
-        if (self._db) return Promise.resolve(self._db);
-        return new Promise(function (resolve, reject) {
-            var req = indexedDB.open(self._dbName, DB_VERSION);
-            req.onupgradeneeded = function () {
-                var db = req.result;
-                if (!db.objectStoreNames.contains('files')) {
-                    db.createObjectStore('files');
-                }
-                if (!db.objectStoreNames.contains('meta')) {
-                    db.createObjectStore('meta');
-                }
-            };
-            req.onsuccess = function () { self._db = req.result; resolve(self._db); };
-            req.onerror = function () { reject(req.error); };
-        });
-    };
-
-    GameDataManager.prototype._putFile = function (db, path, data) {
-        return new Promise(function (resolve, reject) {
-            var tx = db.transaction('files', 'readwrite');
-            tx.objectStore('files').put(data, path);
-            tx.oncomplete = resolve;
-            tx.onerror = function () { reject(tx.error); };
-        });
-    };
-
-    GameDataManager.prototype._putMeta = function (db, info) {
-        return new Promise(function (resolve, reject) {
-            var tx = db.transaction('meta', 'readwrite');
-            tx.objectStore('meta').put(info, 'info');
-            tx.oncomplete = resolve;
-            tx.onerror = function () { reject(tx.error); };
-        });
-    };
-
-    GameDataManager.prototype._getMeta = function (db) {
-        return new Promise(function (resolve, reject) {
-            var tx = db.transaction('meta', 'readonly');
-            var req = tx.objectStore('meta').get('info');
-            req.onsuccess = function () { resolve(req.result || null); };
-            req.onerror = function () { reject(req.error); };
-        });
-    };
-
-    GameDataManager.prototype._getAllFiles = function (db, onFile) {
-        return new Promise(function (resolve, reject) {
-            var tx = db.transaction('files', 'readonly');
-            var store = tx.objectStore('files');
-            var req = store.openCursor();
-            req.onsuccess = function () {
-                var cursor = req.result;
-                if (cursor) {
-                    onFile(cursor.key, cursor.value);
-                    cursor.continue();
-                }
-            };
-            tx.oncomplete = resolve;
-            tx.onerror = function () { reject(tx.error); };
-        });
-    };
 
     // -----------------------------------------------------------------------
     // Public API
     // -----------------------------------------------------------------------
 
-    // Check whether game data has been stored in IndexedDB.
-    // Also validates that stored paths look sane (no URL-encoded slashes).
-    GameDataManager.prototype.hasGameData = function () {
-        var self = this;
-        return self._openDB().then(function (db) {
-            return new Promise(function (resolve, reject) {
-                var tx = db.transaction('meta', 'readonly');
-                var req = tx.objectStore('meta').get('info');
-                req.onsuccess = function () {
-                    if (!req.result) { resolve(false); return; }
-                    // Spot-check the first stored path for URL-encoded
-                    // slashes (%2f) which indicate a previous bad upload.
-                    var checkTx = db.transaction('files', 'readonly');
-                    var cursor = checkTx.objectStore('files').openCursor();
-                    cursor.onsuccess = function () {
-                        var c = cursor.result;
-                        if (c && c.key.indexOf('%2f') !== -1) {
-                            console.warn('[GDM] Detected stale URL-encoded paths in IDB — clearing.');
-                            self.clear().then(function () { resolve(false); });
-                        } else {
-                            resolve(true);
-                        }
-                    };
-                    cursor.onerror = function () { resolve(true); };
-                };
-                req.onerror = function () { reject(req.error); };
-            });
-        });
-    };
-
-    // Load game data from IndexedDB into the Emscripten FS.
-    // Calls `onProgress(loaded, total)` for each file.
-    GameDataManager.prototype.loadToFS = function (onProgress) {
-        var self = this;
-        return self._openDB().then(function (db) {
-            return self._getMeta(db).then(function (meta) {
-                var total = meta ? meta.fileCount : 0;
-                var loaded = 0;
-                return self._getAllFiles(db, function (path, data) {
-                    _writeToFS(path, new Uint8Array(data));
-                    loaded++;
-                    if (onProgress) onProgress(loaded, total);
-                });
-            });
-        });
-    };
-
-    // Check whether game data was preloaded into FS at build time.
-    // Looks for known level file extensions under /data/.
-    GameDataManager.prototype.hasPreloadedGameData = function () {
-        try {
-            var entries = FS.readdir('/data');
-            for (var i = 0; i < entries.length; i++) {
-                var name = entries[i].toLowerCase();
-                for (var j = 0; j < LEVEL_EXTS.length; j++) {
-                    if (name.endsWith(LEVEL_EXTS[j])) return true;
-                }
-                for (var j = 0; j < SFX_EXTS.length; j++) {
-                    if (name.endsWith(SFX_EXTS[j])) return true;
-                }
-            }
-        } catch (e) {
-            // /data/ might not exist yet
-        }
-        return false;
-    };
-
-    // Dump preloaded FS data into IndexedDB (runs in the background).
-    // This lets subsequent visits load from IDB and enables offline use.
-    GameDataManager.prototype.dumpPreloadedToIDB = function (onProgress) {
-        var self = this;
-        var files = [];
-
-        // Recursively walk FS directories for game data files.
-        function walk(dir) {
-            var entries;
-            try { entries = FS.readdir(dir); } catch (e) { return; }
-            for (var i = 0; i < entries.length; i++) {
-                if (entries[i] === '.' || entries[i] === '..') continue;
-                var full = dir + '/' + entries[i];
-                var stat;
-                try { stat = FS.stat(full); } catch (e) { continue; }
-                if (FS.isDir(stat.mode)) {
-                    walk(full);
-                } else {
-                    var lower = entries[i].toLowerCase();
-                    var isGameFile = false;
-                    for (var j = 0; j < ALL_GAME_EXTS.length; j++) {
-                        if (lower.endsWith(ALL_GAME_EXTS[j])) {
-                            isGameFile = true;
-                            break;
-                        }
-                    }
-                    if (isGameFile) {
-                        // Store path without leading slash (e.g. "data/gym.phd")
-                        files.push(full.substring(1));
-                    }
-                }
-            }
-        }
-
-        walk('/data');
-        walk('/music');
-        walk('/fmv');
-        walk('/cuts');
-        walk('/audio');
-
-        if (files.length === 0) return Promise.resolve();
-
-        return self._openDB().then(function (db) {
-            var totalBytes = 0;
-            var stored = 0;
-
-            function storeNext() {
-                if (stored >= files.length) {
-                    return self._putMeta(db, {
-                        version: 1,
-                        fileCount: files.length,
-                        totalBytes: totalBytes,
-                        uploadDate: new Date().toISOString()
-                    });
-                }
-                var path = files[stored];
-                var data;
-                try { data = FS.readFile('/' + path); } catch (e) { stored++; return storeNext(); }
-                totalBytes += data.byteLength;
-                return self._putFile(db, path, data.buffer).then(function () {
-                    stored++;
-                    if (onProgress) onProgress(stored, files.length);
-                    return storeNext();
-                });
-            }
-
-            return storeNext();
-        });
-    };
-
     // Process uploaded files (from file input or drag-and-drop).
-    // `items` is a FileList or array of File objects.
-    // Calls `onProgress(message, fraction)` with status updates.
-    // `onWarning(message)` is called when no FMV cutscenes are found;
-    // it must return a Promise that resolves to continue or rejects to cancel.
-    // `onLanguageSelect(languages)` is called when multiple audio language
-    // directories are detected (e.g. SFX/DE/, SFX/FR/); it must return a
-    // Promise resolving to the chosen language code (e.g. "en").
+    // Returns an array of { path: 'games/<mod>/...', data: Uint8Array }.
+    // `onProgress(message, fraction)` for status updates.
+    // `onWarning(message)` when no FMV cutscenes found; returns Promise.
+    // `onLanguageSelect(languages)` for multi-language audio; returns Promise.
     GameDataManager.prototype.processUpload = function (items, onProgress, onWarning, onLanguageSelect) {
         var self = this;
 
@@ -289,7 +75,7 @@ var GameDataManager = (function () {
             return langStep.then(function (filteredEntries) {
 
             report('Mapping files...', 0.7);
-            var mapped = _mapFiles(filteredEntries, self.gameId);
+            var mapped = _mapFiles(filteredEntries, self.modId);
             if (mapped.length === 0) {
                 throw new Error('No recognised game files found. Please provide your original Tomb Raider game files.');
             }
@@ -315,56 +101,19 @@ var GameDataManager = (function () {
                 );
 
             return proceed.then(function () {
-
-            report('Saving to browser storage...', 0.75);
-            return self._openDB().then(function (db) {
-                var totalBytes = 0;
-                var stored = 0;
-
-                function storeNext() {
-                    if (stored >= mapped.length) {
-                        return self._putMeta(db, {
-                            version: 1,
-                            fileCount: mapped.length,
-                            totalBytes: totalBytes,
-                            uploadDate: new Date().toISOString()
-                        });
-                    }
-                    var entry = mapped[stored];
-                    totalBytes += entry.data.byteLength;
-                    return self._putFile(db, entry.path, entry.data.buffer).then(function () {
-                        stored++;
-                        var frac = 0.75 + 0.2 * (stored / mapped.length);
-                        report('Saving ' + entry.path + '...', frac);
-                        return storeNext();
-                    });
-                }
-
-                return storeNext();
-            }).then(function () {
-                report('Loading into game...', 0.95);
-                for (var i = 0; i < mapped.length; i++) {
-                    var entry = mapped[i];
-                    _writeToFS(entry.path, entry.data);
-                }
-                report('Done!', 1.0);
+                report('Done mapping.', 0.75);
+                return mapped;
             });
-
-            }); // proceed.then
 
             }); // langStep.then
         });
     };
 
-    // Delete all stored game data (for re-upload).
-    GameDataManager.prototype.clear = function () {
-        var self = this;
-        return new Promise(function (resolve, reject) {
-            if (self._db) { self._db.close(); self._db = null; }
-            var req = indexedDB.deleteDatabase(self._dbName);
-            req.onsuccess = resolve;
-            req.onerror = function () { reject(req.error); };
-        });
+    // Write mapped files into the Emscripten FS.
+    GameDataManager.prototype.loadMappedToFS = function (mappedFiles) {
+        for (var i = 0; i < mappedFiles.length; i++) {
+            _writeToFS(mappedFiles[i].path, mappedFiles[i].data);
+        }
     };
 
     // -----------------------------------------------------------------------
@@ -522,7 +271,7 @@ var GameDataManager = (function () {
     // -----------------------------------------------------------------------
 
     // Map raw extracted entries to VFS paths the engine expects.
-    function _mapFiles(entries, gameId) {
+    function _mapFiles(entries, modId) {
         // 1. Find the root by looking for known directory patterns.
         var root = _detectRoot(entries);
 
@@ -546,7 +295,7 @@ var GameDataManager = (function () {
             if (!relPath || data.byteLength === 0) continue;
 
             // Classify and map to VFS path
-            var vfsPath = _classifyFile(lowerPath, relPath, gameId);
+            var vfsPath = _classifyFile(lowerPath, relPath, modId);
             if (vfsPath) {
                 mapped.push({ path: vfsPath, data: data });
             }
@@ -590,10 +339,11 @@ var GameDataManager = (function () {
     }
 
     // Classify a file by its path and extension, returning the VFS path the
-    // engine expects, or null if the file should be skipped.
-    function _classifyFile(lowerPath, originalRelPath, gameId) {
+    // engine expects under games/<mod>/, or null if the file should be skipped.
+    function _classifyFile(lowerPath, originalRelPath, modId) {
         var ext = _getExt(lowerPath);
         var lowerBase = lowerPath.split('/').pop();
+        var prefix = 'games/' + modId + '/';
 
         // --- Skip remaster-only files (.trg, .dds, .trm, .pdp, .map, .tex) ---
         if (_hasExt(ext, REMASTER_SKIP_EXTS)) {
@@ -606,33 +356,33 @@ var GameDataManager = (function () {
             // "cuts" directory or starting with "cut" prefix.
             var inCutsDir = lowerPath.indexOf('cuts/') === 0;
             if (inCutsDir) {
-                return 'cuts/' + lowerBase;
+                return prefix + 'cuts/' + lowerBase;
             }
-            return 'data/' + lowerBase;
+            return prefix + 'levels/' + lowerBase;
         }
 
         // --- Sound effects ---
         // Remastered stores SFX under sfx/ (e.g. sfx/main.sfx) instead
-        // of data/.  Both layouts map to data/.
+        // of data/.  Both layouts map to the mod root.
         if (_hasExt(ext, SFX_EXTS)) {
-            return 'data/' + lowerBase;
+            return prefix + lowerBase;
         }
 
         // --- Music tracks ---
         // Remastered stores music under tracks/ (e.g. tracks/2.ogg)
         // instead of music/.  Both layouts map to music/.
         if (_hasExt(ext, MUSIC_EXTS)) {
-            return 'music/' + lowerBase;
+            return prefix + 'music/' + lowerBase;
         }
 
         // --- FMV cutscenes (.rpl, .ogv, .mp4, .avi — decoded by FFmpeg) ---
         if (_hasExt(ext, FMV_EXTS)) {
-            return 'fmv/' + lowerBase;
+            return prefix + 'fmv/' + lowerBase;
         }
 
         // --- Audio WAD (TR3) ---
         if (_hasExt(ext, AUDIO_EXTS)) {
-            return 'audio/' + lowerBase;
+            return prefix + 'audio/' + lowerBase;
         }
 
         return null;  // skip unknown files
