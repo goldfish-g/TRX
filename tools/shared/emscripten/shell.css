@@ -300,6 +300,53 @@ html, body { width: 100%; height: 100dvh; overflow: hidden; background: #000; }
     to { transform: rotate(360deg); }
 }
 
+/* Reset defaults dialog */
+#reset-defaults-dialog {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 16;
+    background: rgba(0, 0, 0, 0.85);
+}
+#reset-defaults-dialog p {
+    text-align: center;
+    margin-bottom: 0.5em;
+    line-height: 1.5;
+}
+.reset-note {
+    font-size: 0.8em;
+    color: #888;
+}
+#reset-defaults-progress {
+    margin: 1.2em 0;
+}
+#reset-defaults-progress .progress-bar {
+    height: 6px;
+    background: #333;
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 0.6em;
+}
+#reset-defaults-progress .progress-fill {
+    height: 100%;
+    background: #c8a040;
+    width: 0%;
+    transition: width 0.2s;
+}
+.reset-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6em;
+}
+.reset-status-row .spinner {
+    width: 16px;
+    height: 16px;
+    border-width: 2px;
+}
+
 /* Upload UI */
 #upload-screen {
     position: absolute;

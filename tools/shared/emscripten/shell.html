@@ -74,6 +74,25 @@
         </div>
     </div>
 
+    <div id="reset-defaults-dialog" class="hidden">
+        <div class="profile-dialog-inner">
+            <h2>Reset Defaults</h2>
+            <p id="reset-defaults-text">Reset all default profiles? This will clear cached game data and re-add any deleted defaults. Game data will be re-downloaded on next play.</p>
+            <p class="reset-note">Save data and settings are not affected.</p>
+            <div id="reset-defaults-progress" class="hidden">
+                <div class="progress-bar"><div class="progress-fill" id="reset-defaults-fill"></div></div>
+                <div class="reset-status-row">
+                    <div class="spinner"></div>
+                    <p id="reset-defaults-status">Resetting...</p>
+                </div>
+            </div>
+            <div id="reset-defaults-buttons" class="profile-dialog-buttons">
+                <button id="btn-reset-confirm" type="button">Reset</button>
+                <button id="btn-reset-cancel" type="button">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <div id="upload-screen" class="hidden">
         <div class="upload-inner">
             <h1>TRX</h1>
@@ -363,10 +382,7 @@
             var newResetBtn = resetBtn.cloneNode(true);
             resetBtn.parentNode.replaceChild(newResetBtn, resetBtn);
             newResetBtn.addEventListener('click', function () {
-                if (!confirm('Reset all default profiles?\n\nThis will clear cached game data and re-add any deleted defaults. Game data will be re-downloaded on next play.\n\nSave data and settings are not affected.')) return;
-                pm.resetDefaults(_trxDefaultManifest).then(function () {
-                    window.location.reload();
-                });
+                _trxShowResetDefaultsDialog();
             });
         }
 
@@ -476,6 +492,54 @@
                 { mod: 'tr3-level', label: 'Custom Level' },
             ],
         };
+
+        function _trxShowResetDefaultsDialog() {
+            var dialog = document.getElementById('reset-defaults-dialog');
+            var progressDiv = document.getElementById('reset-defaults-progress');
+            var progressFill = document.getElementById('reset-defaults-fill');
+            var status = document.getElementById('reset-defaults-status');
+            var buttons = document.getElementById('reset-defaults-buttons');
+            var confirmBtn = document.getElementById('btn-reset-confirm');
+            var cancelBtn = document.getElementById('btn-reset-cancel');
+
+            progressDiv.classList.add('hidden');
+            progressFill.style.width = '0%';
+            buttons.classList.remove('hidden');
+            dialog.classList.remove('hidden');
+
+            function cleanup() {
+                dialog.classList.add('hidden');
+                confirmBtn.removeEventListener('click', onConfirm);
+                cancelBtn.removeEventListener('click', onCancel);
+            }
+
+            function onConfirm() {
+                confirmBtn.removeEventListener('click', onConfirm);
+                cancelBtn.removeEventListener('click', onCancel);
+                buttons.classList.add('hidden');
+                progressDiv.classList.remove('hidden');
+                status.textContent = 'Resetting...';
+
+                _trxProfileManager.resetDefaults(_trxDefaultManifest, function (done, total, name) {
+                    var pct = total > 0 ? Math.round((done / total) * 100) : 0;
+                    progressFill.style.width = pct + '%';
+                    if (name) {
+                        status.textContent = 'Clearing ' + name + '...';
+                    }
+                }).then(function () {
+                    progressFill.style.width = '100%';
+                    status.textContent = 'Done! Reloading...';
+                    setTimeout(function () { window.location.reload(); }, 500);
+                });
+            }
+
+            function onCancel() {
+                cleanup();
+            }
+
+            confirmBtn.addEventListener('click', onConfirm);
+            cancelBtn.addEventListener('click', onCancel);
+        }
 
         function _trxShowDeleteDialog(profile, refresh) {
             var dialog = document.getElementById('delete-profile-dialog');
@@ -912,7 +976,7 @@
             if (e.target === canvas) return;
 
             // Don't forward when an overlay is visible.
-            var overlays = ['start-gate', 'profile-selector', 'create-profile-dialog', 'delete-profile-dialog', 'upload-screen', 'loading'];
+            var overlays = ['start-gate', 'profile-selector', 'create-profile-dialog', 'delete-profile-dialog', 'reset-defaults-dialog', 'upload-screen', 'loading'];
             for (var i = 0; i < overlays.length; i++) {
                 var el = document.getElementById(overlays[i]);
                 if (el && !el.classList.contains('hidden')) return;

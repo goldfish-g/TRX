@@ -56,7 +56,7 @@ EM_JS(void, js_init_idbfs, (const char *mount_path), {
     var path = UTF8ToString(mount_path);
     try { FS.mkdir('/persist'); } catch(e) {}
     try { FS.mkdir(path); } catch(e) {}
-    FS.mount(IDBFS, {}, path);
+    try { FS.mount(IDBFS, {}, path); } catch(e) {}
     try { FS.mkdir(path + '/saves'); } catch(e) {}
     try { FS.mkdir(path + '/cfg'); } catch(e) {}
 })
