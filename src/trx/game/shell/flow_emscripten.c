@@ -107,6 +107,33 @@ EM_JS(int, js_has_touch_support, (void), {
     return navigator.maxTouchPoints > 0 ? 1 : 0;
 })
 
+// --- Profile selector ---
+
+EM_JS(void, js_show_profile_selector, (void), {
+    Module._profileSelectionDone = false;
+    Module._selectedMod = '';
+    Module._selectedEngine = 0;
+    if (Module.showProfileSelector) {
+        Module.showProfileSelector(function(mod, engine) {
+            Module._selectedMod = mod;
+            Module._selectedEngine = engine;
+            Module._profileSelectionDone = true;
+        });
+    }
+})
+
+EM_JS(int, js_is_profile_selection_done, (void), {
+    return Module._profileSelectionDone ? 1 : 0;
+})
+
+EM_JS(void, js_get_selected_mod, (char *buf, int bufsize), {
+    stringToUTF8(Module._selectedMod || '', buf, bufsize);
+})
+
+EM_JS(int, js_get_selected_engine, (void), {
+    return Module._selectedEngine || 0;
+})
+
 // clang-format on
 
 // setenv is POSIX but not declared under strict C standard modes.
@@ -114,26 +141,31 @@ int setenv(const char *name, const char *value, int overwrite);
 
 void Shell_InitIDBFS(void)
 {
-    js_init_idbfs("/persist/" TRX_GAME_ID);
+    const SHELL_ARGS *const args = Shell_GetArgs();
+    const char *mod_name = args->mod != nullptr ? args->mod->name : "trx";
+
+    char mount_path[64];
+    snprintf(mount_path, sizeof(mount_path), "/persist/%s", mod_name);
+    js_init_idbfs(mount_path);
 
     js_start_idbfs_sync_from_db();
     while (!js_is_idbfs_sync_done()) {
         Clock_Delay(10);
     }
-    WEBGL_LOG("[WEBGL] IDBFS ready at /persist/%s", TRX_GAME_ID);
+    WEBGL_LOG("[WEBGL] IDBFS ready at /persist/%s", mod_name);
 
     // Redirect saves directory to IDBFS-backed path.
     char saves_dir[64];
-    snprintf(saves_dir, sizeof(saves_dir), "/persist/%s/saves", TRX_GAME_ID);
+    snprintf(saves_dir, sizeof(saves_dir), "/persist/%s/saves", mod_name);
     setenv("TRX_SAVES_DIR", saves_dir, 1);
 
     // Restore persisted user config to /cfg/ (before Config_Read runs).
-    const int ver = TRX_GAME_ID[2] - '0';
+    const int ver = args->engine_version;
     char persist_cfg[64];
     char cfg_path[64];
     snprintf(
         persist_cfg, sizeof(persist_cfg), "/persist/%s/cfg/TR%dX.json5",
-        TRX_GAME_ID, ver);
+        mod_name, ver);
     snprintf(cfg_path, sizeof(cfg_path), "/cfg/TR%dX.json5", ver);
     js_restore_config(persist_cfg, cfg_path);
 }
@@ -148,13 +180,31 @@ void Shell_WaitForUserInput(void)
     WEBGL_LOG("[WEBGL] User interaction received, proceeding.");
 }
 
+static void M_WaitForProfileSelection(void)
+{
+    js_show_profile_selector();
+    while (!js_is_profile_selection_done()) {
+        Clock_Delay(50);
+    }
+}
+
+void Shell_ShowProfileSelector(
+    char *mod_buf, const int32_t mod_buf_size, int32_t *engine_out)
+{
+    M_WaitForProfileSelection();
+    js_get_selected_mod(mod_buf, mod_buf_size);
+    *engine_out = js_get_selected_engine();
+}
+
 void Shell_PersistConfigToIDBFS(void)
 {
-    const int ver = TRX_GAME_ID[2] - '0';
+    const SHELL_ARGS *const args = Shell_GetArgs();
+    const char *mod_name = args->mod != nullptr ? args->mod->name : "trx";
+    const int ver = args->engine_version;
     char src[64];
     char dst[64];
     snprintf(src, sizeof(src), "/cfg/TR%dX.json5", ver);
-    snprintf(dst, sizeof(dst), "/persist/%s/cfg/TR%dX.json5", TRX_GAME_ID, ver);
+    snprintf(dst, sizeof(dst), "/persist/%s/cfg/TR%dX.json5", mod_name, ver);
     js_persist_file_and_sync(src, dst);
 }
 
@@ -176,6 +226,15 @@ void Shell_SetTouchControlsVisible(const bool visible)
 uint32_t Shell_GetWindowExtraFlags(void)
 {
     return SDL_WINDOW_ALLOW_HIGHDPI;
+}
+
+void Shell_PostSDLInit(void)
+{
+    // Restrict SDL keyboard handling to the canvas element so that HTML
+    // form inputs (e.g. profile creation dialog) receive keystrokes
+    // normally.  A document-level forwarder in shell.html re-dispatches
+    // keyboard events to the canvas when the game is running.
+    SDL_SetHint(SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT, "#canvas");
 }
 
 void Shell_SetupGLContextVersion(void)

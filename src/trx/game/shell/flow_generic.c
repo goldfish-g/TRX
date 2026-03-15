@@ -11,6 +11,14 @@ void Shell_WaitForUserInput(void)
 {
 }
 
+void Shell_ShowProfileSelector(
+    char *const mod_buf, const int32_t mod_buf_size, int32_t *const engine_out)
+{
+    (void)mod_buf;
+    (void)mod_buf_size;
+    (void)engine_out;
+}
+
 void Shell_PersistConfigToIDBFS(void)
 {
 }
@@ -31,6 +39,10 @@ void Shell_SetTouchControlsVisible(const bool visible)
 uint32_t Shell_GetWindowExtraFlags(void)
 {
     return 0;
+}
+
+void Shell_PostSDLInit(void)
+{
 }
 
 void Shell_SetupGLContextVersion(void)

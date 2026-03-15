@@ -49,162 +49,212 @@ The WebGL build uses Emscripten's built-in ports for most dependencies:
 ```bash
 source /path/to/emsdk/emsdk_env.sh
 
-./tools/build_webgl.sh tr1 debug            # TR1 debug build
-./tools/build_webgl.sh tr2 release          # TR2 release build
-./tools/build_webgl.sh tr1 release --no-game-data   # without bundled game data
-./tools/build_webgl.sh tr1 debug --eruda    # with eruda mobile debugger
+./tools/build_webgl.sh release --tr1                # TR1 only
+./tools/build_webgl.sh release --tr1 --tr2          # TR1 + TR2
+./tools/build_webgl.sh release --tr1 --ub --tr2 --gm --tr3 --la  # all games
+./tools/build_webgl.sh debug                        # upload-only (no bundled data)
+./tools/build_webgl.sh debug --eruda                # with eruda mobile debugger
 ```
 
-Usage: `./tools/build_webgl.sh [tr1|tr2] [debug|release|debugoptim] [options]`
+Usage: `./tools/build_webgl.sh [debug|release|debugoptim] [flags]`
 
-Options:
+Game data flags:
 
-| Flag              | Effect                                              |
-|-------------------|-----------------------------------------------------|
-| `--no-game-data`  | Do not bundle user game data even if present         |
-| `--eruda`         | Inject eruda mobile debugger into the HTML           |
+| Flag     | Game                  | Data source    |
+|----------|-----------------------|----------------|
+| `--tr1`  | Tomb Raider I         | `tr1_data/`    |
+| `--ub`   | Unfinished Business   | `ub_data/`     |
+| `--tr2`  | Tomb Raider II        | `tr2_data/`    |
+| `--gm`   | The Golden Mask       | `gm_data/`     |
+| `--tr3`  | Tomb Raider III       | `tr3_data/`    |
+| `--la`   | The Lost Artifact     | `la_data/`     |
+
+Other flags:
+
+| Flag      | Effect                                             |
+|-----------|----------------------------------------------------|
+| `--eruda` | Inject eruda mobile debugger into the HTML          |
+
+Each game data flag bundles user game data (levels, SFX, music, FMV) from the
+corresponding data directory and creates a default profile for that game.
+Builds with no flags produce an upload-only deployment where users create
+profiles and upload their own game files.
 
 ### Docker Build (recommended for CI / reproducibility)
 
 A Docker image based on `emscripten/emsdk` provides a self-contained build
-environment. The `deploy.sh` script at the repository root automates building
-both TR1 and TR2, deploying to a local directory, and starting HTTP servers:
+environment:
 
 ```bash
-# Test deployment (ports 8081/8082, bundles game data, includes eruda)
-sudo ./deploy.sh test
-
-# Test deployment without game data (users upload at runtime)
-sudo ./deploy.sh test --no-game-data
-
-# Production deployment (ports 9081/9082, no game data, no eruda)
-sudo ./deploy.sh prod
+docker run --rm -v "$PWD:/app" --user "$(id -u):$(id -g)" \
+    rrdash/trx-webgl build --target release --tr1 --tr2
 ```
 
-| Environment | Ports         | Game data default | Eruda |
-|-------------|---------------|-------------------|-------|
-| `test`      | 8081 / 8082   | bundled           | yes   |
-| `prod`      | 9081 / 9082   | excluded          | no    |
-
-Both defaults can be overridden with `--game-data` or `--no-game-data`.
-
-The Docker image (`tools/shared/docker/game-webgl/Dockerfile`) installs
-Meson, Ninja, pyjson5, and Pillow on top of the official emsdk image. The
-entrypoint (`tools/shared/docker/game-webgl/entrypoint.sh`) forwards
-`--no-game-data` and `--eruda` flags to `build_webgl.sh`.
+The Docker entrypoint forwards all game data flags (`--tr1`, `--ub`, `--tr2`,
+`--gm`, `--tr3`, `--la`) and `--eruda` directly to `build_webgl.sh`.
 
 ### Manual Build
 
 ```bash
 source /path/to/emsdk/emsdk_env.sh
 
+# First create the VFS staging directory (normally done by build_webgl.sh)
+# Then pass it to meson:
 meson setup \
   --cross-file tools/shared/emscripten/emscripten_cross.ini \
   --buildtype debug \
   -Dstaticdeps=false \
-  -Dgame=tr1 \
-  -Dwebgl_bundle_gamedata=auto \
-  build/webgl-tr1 \
+  -Dwebgl_vfs_stage=/path/to/vfs_stage \
+  build/webgl \
   src/
 
-meson compile -C build/webgl-tr1 TRX
+meson compile -C build/webgl TRX
 ```
 
-The `webgl_bundle_gamedata` option controls whether user game data (levels,
-music, SFX) is embedded in `TRX.data`:
-
-| Value  | Behavior                                         |
-|--------|--------------------------------------------------|
-| `auto` | Bundle if game data directories exist (default)  |
-| `yes`  | Always bundle (error if directories are missing) |
-| `no`   | Never bundle; users upload at runtime            |
+The `webgl_vfs_stage` option points to the staging directory that the build
+script populates with the `games/` directory layout.
 
 ## Output Files
 
 After a successful build:
 
 ```
-build/webgl-tr1/
+build/webgl/
 ├── TRX.html              # Main HTML page
 ├── TRX.js                # Emscripten JavaScript glue code
 ├── TRX.wasm              # WebAssembly binary
-├── TRX.data              # Preloaded assets (always includes TRX config/shaders;
-│                         #   includes game data only if bundled)
-├── gamedata.js           # Game data upload/persistence manager
+├── TRX.data              # Preloaded assets (config, shaders, game data)
+├── gamedata.js           # Game data upload/mapping manager
+├── profiles.js           # Profile manager (IndexedDB-backed)
+├── shell.css             # Stylesheet
 ├── vendor/
 │   └── fflate.min.js     # ZIP/gzip decompression library
 ├── manifest.webmanifest  # PWA manifest
 ├── sw.js                 # Service worker for offline support
 ├── icon-192.png          # PWA icon (192x192)
-├── icon-512.png          # PWA icon (512x512)
-└── fmv/                  # FMV cutscenes (if tr1_data/fmv/ exists)
-    ├── cafe.mp4
-    └── ...
+└── icon-512.png          # PWA icon (512x512)
 ```
 
 The build script applies cache-busting query strings (based on the WASM hash)
 to all `<script>` tags in `TRX.html`, ensuring browsers never serve stale
 assets after a rebuild.
 
+## Profile System
+
+The WebGL build uses a profile system to manage multiple games from a single
+deployment. Profiles map to game mods (tr1, tr1-ub, tr2, etc.) and store
+user game data in IndexedDB.
+
+### Default profiles
+
+When game data flags are used at build time, default profiles are created
+automatically. The `profiles_defaults.json` manifest in the VFS staging
+directory specifies which default profiles to create:
+
+```json
+[
+  {
+    "id": "tr1",
+    "name": "Tomb Raider I",
+    "mod": "tr1",
+    "engine": 1,
+    "description": "The original adventure. Explore ancient ruins from Peru to Atlantis."
+  }
+]
+```
+
+### Auto-start
+
+If exactly one default profile with bundled game data exists, the game
+auto-starts without showing the profile selector (matching the single-game
+build behavior).
+
+### User profiles
+
+Users can create profiles for any supported game, including custom levels
+(TRLEs). Known mods (tr1, tr1-ub, etc.) only need user game data uploaded
+(levels, SFX, music, FMV) because ship config (gameflow, strings, injections)
+is always bundled. Custom level profiles need all files uploaded.
+
+### Profile selector
+
+The profile selector appears when:
+- Multiple default profiles exist (e.g., `--tr1 --tr2` build)
+- No default profiles have bundled data
+- The user exits a game via the passport's "Exit Game" option
+
+### Mod switching
+
+When a user exits a game and picks a different profile, the engine performs
+a full mod switch (cleanup, session free, restart loop) using the existing
+`Shell_RequestModSwitch()` infrastructure.
+
 ## Running Locally
 
-WebGL builds require a web server (WASM cannot be loaded from `file://` URLs):
+WebGL builds require a web server with COOP/COEP headers for SharedArrayBuffer
+(needed by pthreads):
 
 ```bash
-cd build/webgl-tr1
-python3 -m http.server 8080
+cd build/webgl
+python3 -c "
+import http.server
+class H(http.server.SimpleHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header('Cross-Origin-Opener-Policy','same-origin')
+        self.send_header('Cross-Origin-Embedder-Policy','require-corp')
+        super().end_headers()
+http.server.HTTPServer(('',8080),H).serve_forever()"
 # Open http://localhost:8080/TRX.html
 ```
 
 ## Game Data
 
-### What TRX ships (always bundled in TRX.data)
+### VFS directory layout
 
-- `cfg/` — configuration JSON5 (strings, UI, gameflow, catalogs)
-- `shaders/` — GLSL shaders
-- `data/injections/` — binary patches
-- `data/images/` — UI artwork (WebP)
-- `data/scripts/` — Lua scripts
+The build creates a `games/` directory structure in the VFS:
+
+```
+games/
+├── tr1/                    # Base game — config + data + user game data
+│   ├── gameflow.json5
+│   ├── strings*.json5
+│   ├── catalog_*.csv
+│   ├── inv_ring.json5
+│   ├── weapons.json5
+│   ├── injections/
+│   ├── images/
+│   ├── scripts/
+│   ├── levels/             # User game data (if --tr1 flag used)
+│   ├── music/
+│   └── fmv/
+├── tr1-ub/                 # Expansion — mod config only (falls back to tr1/)
+│   ├── gameflow.json5
+│   └── strings*.json5
+├── tr2/                    # Same pattern as tr1/
+│   └── ...
+├── tr2-gm/                 # Same pattern as tr1-ub/
+│   └── ...
+├── tr3/
+│   └── ...
+└── tr3-la/
+    └── ...
+```
+
+Base game directories always contain ship config + data (catalogs, injections,
+images, scripts). Expansion directories only contain mod-specific config
+(gameflow, strings) — they find shared data via the base game fallback in the
+path resolver.
 
 ### What users must provide
 
 These are the copyrighted game files from GOG or Steam:
 
-- **TR1**: `data/*.phd` (levels), `music/Track*.flac` (59 tracks)
+- **TR1**: `data/*.phd` (levels), `data/main.sfx`, `music/Track*.flac`
 - **TR2**: `data/*.tr2` (levels), `data/main.sfx`, `music/*.mp3`
+- **TR3**: `data/*.tr2` (levels), `data/main.sfx`, `music/*.wav`, `audio/cdaudio.wad`
 
 FMV cutscenes (`.mp4`) are optional; the game skips missing cutscenes
 gracefully.
-
-### Build with game data (default)
-
-Place game files in `tr1_data/` or `tr2_data/` alongside the repository:
-
-```
-tr1_data/
-├── data/          # Level files (.phd, .sfx, etc.)
-├── music/         # Music tracks (Track02.flac .. Track60.flac)
-└── fmv/           # FMV cutscenes as .mp4 (optional)
-```
-
-When game data is bundled, the runtime flow is:
-
-1. Browser loads TRX.html, TRX.js, TRX.wasm, TRX.data (includes game data)
-2. Emscripten FS ready with game data already in `/data/` and `/music/`
-3. Game starts immediately
-4. In the background, game data is copied to IndexedDB for offline support
-5. On subsequent visits, data loads from IndexedDB (fast, works offline)
-
-### Build without game data (`--no-game-data`)
-
-When game data is not bundled, users see an upload screen on first visit:
-
-1. Browser loads the (smaller) TRX.data containing only TRX-owned assets
-2. Upload UI appears asking the user for their game files
-3. User uploads via folder selection, ZIP, or tar.gz
-4. Files are extracted, mapped to the correct VFS paths, and stored in IndexedDB
-5. Game starts
-6. On subsequent visits, data loads from IndexedDB without re-uploading
 
 ### Upload formats
 
@@ -215,16 +265,20 @@ The upload UI (`gamedata.js`) accepts:
 - **tar.gz archive** — extracted with fflate (gzip) + minimal tar parser
 
 The uploader auto-detects the archive root, normalizes paths to lowercase, and
-maps files to the expected VFS locations (`/data/`, `/music/`, etc.) regardless
-of the original directory structure.
+maps files to the expected VFS locations (`games/<mod>/levels/`, etc.)
+regardless of the original directory structure.
 
 ### IndexedDB persistence
 
-Game data is stored in an IndexedDB database named `trx-gamedata-{game_id}`
-(e.g., `trx-gamedata-tr1`) with two object stores:
+Profile data is stored in an IndexedDB database named `trx-profiles` with
+two object stores:
 
-- `files` — keyed by VFS path (e.g., `data/gym.phd`), values are ArrayBuffers
-- `meta` — stores upload metadata (file count, total bytes, upload date)
+- `profiles` — keyed by profile ID, stores profile metadata (name, mod,
+  engine, description, timestamps)
+- `gamedata` — keyed by `profileId/vfsPath` (e.g., `tr1/games/tr1/levels/gym.phd`),
+  values are ArrayBuffers
+
+Save games and config are persisted via IDBFS at `/persist/<mod>/`.
 
 ## FMV Cutscenes
 
@@ -244,7 +298,8 @@ ffmpeg -i upscaled.ogv -i original.fmv \
   output.mp4
 ```
 
-Place the results in `tr1_data/fmv/` with lowercase `.mp4` filenames.
+Place the results in the appropriate `_data/fmv/` directory with lowercase
+`.mp4` filenames.
 
 ### Runtime playback
 
@@ -266,12 +321,12 @@ player falls back to fetching via HTTP (for builds that include FMVs in the
 The build produces a Progressive Web App that can be installed on desktop and
 mobile devices:
 
-- **`manifest.webmanifest`** — generated from `manifest.webmanifest.in` with
-  game-specific names (TR1X, TR2X). Configures fullscreen landscape display.
+- **`manifest.webmanifest`** — generated with app name "TRX". Configures
+  fullscreen landscape display.
 - **`sw.js`** — service worker generated from `sw.js.in`. Precaches all static
-  assets (HTML, JS, WASM, gamedata.js, fflate, icons). Caches `TRX.data` on
-  first use for offline support. FMV streaming requests are passed through
-  uncached.
+  assets (HTML, JS, WASM, gamedata.js, profiles.js, fflate, icons). Caches
+  `TRX.data` on first use for offline support. FMV streaming requests are
+  passed through uncached.
 - **Icons** — generated from `data/trx/icon.png` by `generate_icons.py`
   (requires Pillow). Produces 192x192 and 512x512 PNGs.
 
@@ -296,9 +351,6 @@ start gate ("press any key" splash), preventing any black screen gap.
 The `--eruda` flag injects the [eruda](https://github.com/nicknisi/eruda)
 mobile console into the build. This provides a floating developer tools panel
 useful for debugging on mobile devices where browser DevTools are unavailable.
-
-When using `deploy.sh`, test builds include eruda automatically; production
-builds do not.
 
 ### Browser DevTools
 
@@ -406,9 +458,11 @@ GLSL ES 3.00 (WebGL 2) by:
 
 | File | Purpose |
 |------|---------|
-| `tools/build_webgl.sh` | Main build script |
-| `tools/shared/emscripten/shell.html` | HTML shell template (loading UI, upload UI, canvas) |
-| `tools/shared/emscripten/gamedata.js` | Game data upload, extraction, IndexedDB persistence |
+| `tools/build_webgl.sh` | Main build script (unified, all games) |
+| `tools/shared/emscripten/shell.html` | HTML shell template (loading, profile selector, upload, canvas) |
+| `tools/shared/emscripten/profiles.js` | Profile manager (IndexedDB, mod definitions) |
+| `tools/shared/emscripten/gamedata.js` | Game data upload, extraction, file mapping |
+| `tools/shared/emscripten/shell.css` | Stylesheet |
 | `tools/shared/emscripten/emscripten_cross.ini` | Meson cross-compilation file |
 | `tools/shared/emscripten/vendor/fflate.min.js` | ZIP/gzip decompression (MIT) |
 | `tools/shared/emscripten/sw.js.in` | Service worker template |
@@ -418,6 +472,7 @@ GLSL ES 3.00 (WebGL 2) by:
 | `tools/shared/docker/game-webgl/entrypoint.sh` | Docker entrypoint |
 | `src/trx/gfx/gl/gl_webgl_compat.h` | OpenGL ES compatibility shim |
 | `src/trx/game/fmv_emscripten.c` | FMV playback via HTML5 video |
+| `src/trx/game/shell/flow_emscripten.c` | Emscripten shell (IDBFS, profile selector EM_JS) |
 
 ## Known Limitations
 
@@ -427,7 +482,7 @@ GLSL ES 3.00 (WebGL 2) by:
 3. **Backtraces** — native stack traces are not available; use browser
    developer tools for debugging.
 4. **Large download** — music and FMV files add significant size. Building
-   with `--no-game-data` avoids this by having users upload their own files.
+   without game data flags avoids this by having users upload their own files.
 5. **FMV format** — only H.264 MP4 is supported (browser-native decoding).
    Original `.rpl`/`.fmv` formats cannot be played.
 
@@ -435,5 +490,5 @@ GLSL ES 3.00 (WebGL 2) by:
 
 - **WebGL 2.0** support (OpenGL ES 3.0)
 - **WebAssembly** support
-- **IndexedDB** support (for game data persistence)
+- **IndexedDB** support (for game data and profile persistence)
 - Modern browsers: Chrome 56+, Firefox 51+, Safari 15+, Edge 79+

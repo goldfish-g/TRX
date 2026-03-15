@@ -40,9 +40,12 @@ SHELL_SIZE Shell_GetCurrentDisplaySize(void);
 // Platform-specific functions (flow_emscripten.c / flow_generic.c).
 void Shell_InitIDBFS(void);
 void Shell_WaitForUserInput(void);
+void Shell_ShowProfileSelector(
+    char *mod_buf, int32_t mod_buf_size, int32_t *engine_out);
 void Shell_PersistConfigToIDBFS(void);
 void Shell_PersistSavesToIDBFS(void);
 bool Shell_HasTouchSupport(void);
 void Shell_SetTouchControlsVisible(bool visible);
 uint32_t Shell_GetWindowExtraFlags(void);
 void Shell_SetupGLContextVersion(void);
+void Shell_PostSDLInit(void);

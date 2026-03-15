@@ -73,13 +73,6 @@ common_build_opts = [
   '-DDEBUG=' + (get_option('buildtype') == 'debug' ? '1' : '0'),
 ]
 
-if is_emscripten
-  game_engine_versions = {'tr1': '1', 'tr2': '2'}
-  common_build_opts += [
-    '-DEMSCRIPTEN_DEFAULT_ENGINE_VERSION=' + game_engine_versions[get_option('game')],
-    '-DTRX_GAME_ID="' + get_option('game') + '"',
-  ]
-endif
 
 # Some warning names are compiler-specific (e.g. Clang-only) and will spam notes
 # on GCC. Only add the ones the current compiler actually supports.
@@ -817,7 +810,6 @@ link_args = []
 if host_machine.system() == 'windows'
   link_args += ['-static']
 elif is_emscripten
-  data_root = meson.project_source_root() + '/../data'
   link_args += [
     '-pthread',
     '-sPTHREAD_POOL_SIZE=4',
@@ -845,57 +837,20 @@ elif is_emscripten
     # threads; only the main-thread pump needs ASYNCIFY):
     #   M_HandlePlayFMV → FMV_Play → M_Play → Video_PumpEvents
     #   → emscripten_sleep
-    '-sASYNCIFY_ADD=["main","Shell_Main","*M_InitIDBFS*","*M_WaitForUserInput*","GF_DoFrontendSequence","GF_DoLevelSequence","GF_DoCutsceneSequence","GF_DoDemoSequence","GF_PlayAvailableStory","GF_InterpretSequence","*M_RunEvent*","*M_HandleExitToTitle*","*M_HandleLevelComplete*","*M_HandlePlayLevel*","*M_HandlePlayCutscene*","*M_HandlePlayFMV*","*M_HandlePlayMusic*","*M_HandlePicture*","*M_HandleInventoryModifier*","*M_HandleLevelStats*","*M_HandleTotalStats*","*M_HandleGlobeSelect*","*M_HandleSetStartAnim*","*M_HandleEnableSunset*","*M_HandleSetupBaconLara*","*M_HandleDisableFloor*","GF_RunTitle","GF_RunGame","GF_ShowInventory","GF_ShowInventoryKeys","GF_RunDemo","GF_RunCutscene","GF_RunGlobeSelect","GF_EnterPhotoMode","GF_PauseGame","PhaseExecutor_Run","*M_RunFadeToBlackTransition*","*M_DrawFadeToBlackTransition*","Clock_WaitTick","Game_ProcessInput","Stats_CalculateMaxStats","Level_Initialise","Level_Pipeline_Load","FMV_Play","Video_PumpEvents","*M_Play*","*M_CompleteSetup*","*M_InitialiseSamplesFromFile*","*M_LoadFromFile*","*M_Control*","*M_Draw*","*M_Start*","*M_Resume*","*M_Suspend*","*M_End*","*M_HandleOverride*","*M_RequestFadeToBlack*","*M_UsesCrossFadeIn*","*Game_Control*"]',
+    '-sASYNCIFY_ADD=["main","Shell_Main","*M_InitIDBFS*","*M_WaitForUserInput*","*M_WaitForProfileSelection*","GF_DoFrontendSequence","GF_DoLevelSequence","GF_DoCutsceneSequence","GF_DoDemoSequence","GF_PlayAvailableStory","GF_InterpretSequence","*M_RunEvent*","*M_HandleExitToTitle*","*M_HandleLevelComplete*","*M_HandlePlayLevel*","*M_HandlePlayCutscene*","*M_HandlePlayFMV*","*M_HandlePlayMusic*","*M_HandlePicture*","*M_HandleInventoryModifier*","*M_HandleLevelStats*","*M_HandleTotalStats*","*M_HandleGlobeSelect*","*M_HandleSetStartAnim*","*M_HandleEnableSunset*","*M_HandleSetupBaconLara*","*M_HandleDisableFloor*","GF_RunTitle","GF_RunGame","GF_ShowInventory","GF_ShowInventoryKeys","GF_RunDemo","GF_RunCutscene","GF_RunGlobeSelect","GF_EnterPhotoMode","GF_PauseGame","PhaseExecutor_Run","*M_RunFadeToBlackTransition*","*M_DrawFadeToBlackTransition*","Clock_WaitTick","Game_ProcessInput","Stats_CalculateMaxStats","Level_Initialise","Level_Pipeline_Load","FMV_Play","Video_PumpEvents","*M_Play*","*M_CompleteSetup*","*M_InitialiseSamplesFromFile*","*M_LoadFromFile*","*M_Control*","*M_Draw*","*M_Start*","*M_Resume*","*M_Suspend*","*M_End*","*M_HandleOverride*","*M_RequestFadeToBlack*","*M_UsesCrossFadeIn*","*Game_Control*"]',
     '-sENVIRONMENT=web',
     '-sEXPORTED_RUNTIME_METHODS=["callMain"]',
     '-lidbfs.js',
     '--shell-file=' + meson.project_source_root() + '/../tools/shared/emscripten/shell.html',
   ]
-  # Preload game data into the Emscripten virtual filesystem.
-  # The engine resolves paths relative to SDL_GetBasePath() which returns "/"
-  # on the web.  Map the ship directories to where the engine expects them:
-  #   data/common/ship/cfg/*    → /cfg/*       (base_strings, ui, etc.)
-  #   data/<game>/ship/cfg/*    → /cfg/*       (gameflow, strings)
-  #   data/common/ship/shaders/ → /shaders/    (GLSL shader files)
-  game = get_option('game')
-  game_data_root = meson.project_source_root() + '/../' + game + '_data/data'
-  game_music_root = meson.project_source_root() + '/../' + game + '_data/music'
-  preload_mappings = [
-    data_root + '/common/ship/cfg@/cfg',
-    data_root + '/' + game + '/ship/cfg@/cfg',
-    data_root + '/common/ship/shaders@/shaders',
-    # Ship data: injections (.bin), Lua scripts, etc.
-    # Mapped to /data so that "data/injections/foo.bin" resolves to
-    # /data/injections/foo.bin in the virtual filesystem.
-    data_root + '/' + game + '/ship/data@/data',
-  ]
 
-  # User game data (level files, music) can be bundled at build time or
-  # uploaded by the user at runtime.  The webgl_bundle_gamedata option
-  # controls this: 'auto' bundles if the directories exist, 'yes' always
-  # bundles (fails if missing), 'no' never bundles.
-  webgl_gamedata = get_option('webgl_bundle_gamedata')
-  bundle_gamedata = false
-  if webgl_gamedata == 'auto'
-    bundle_gamedata = fs.is_dir(game_data_root)
-  elif webgl_gamedata == 'yes'
-    bundle_gamedata = true
+  # Preload the VFS staging directory into the Emscripten virtual filesystem.
+  # The build script creates this directory with the games/ layout containing
+  # ship config, ship data, and optionally bundled user game data.
+  vfs_stage = get_option('webgl_vfs_stage')
+  if vfs_stage != ''
+    link_args += ['--preload-file', vfs_stage + '@/']
   endif
-
-  game_fmv_root = meson.project_source_root() + '/../' + game + '_data/fmv'
-  if bundle_gamedata
-    preload_mappings += [game_data_root + '@/data']
-    if fs.is_dir(game_music_root)
-      preload_mappings += [game_music_root + '@/music']
-    endif
-    if fs.is_dir(game_fmv_root)
-      preload_mappings += [game_fmv_root + '@/fmv']
-    endif
-  endif
-
-  foreach mapping : preload_mappings
-    link_args += ['--preload-file', mapping]
-  endforeach
 endif
 
 
