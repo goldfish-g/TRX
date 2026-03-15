@@ -510,7 +510,7 @@ var ProfileManager = (function () {
     // Clear cached game data for all default profiles and re-create any
     // deleted defaults from the manifest.  Save data and settings live in
     // a separate IDBFS database and are not affected.
-    ProfileManager.prototype.resetDefaults = function (manifest) {
+    ProfileManager.prototype.resetDefaults = function (manifest, onProgress) {
         var self = this;
         return self._openDB().then(function (db) {
             return new Promise(function (resolve, reject) {
@@ -520,14 +520,19 @@ var ProfileManager = (function () {
                 req.onerror = function () { reject(req.error); };
             });
         }).then(function (profiles) {
-            return profiles.filter(function (p) { return p.isDefault; })
-                .reduce(function (chain, p) {
-                    return chain.then(function () {
-                        return self._openDB().then(function (db) {
-                            return self._deleteGameData(db, p.id);
-                        });
+            var defaults = profiles.filter(function (p) { return p.isDefault; });
+            var done = 0;
+            var total = defaults.length;
+            return defaults.reduce(function (chain, p) {
+                return chain.then(function () {
+                    if (onProgress) onProgress(done, total, p.name);
+                    return self._openDB().then(function (db) {
+                        return self._deleteGameData(db, p.id);
                     });
-                }, Promise.resolve());
+                }).then(function () { done++; });
+            }, Promise.resolve()).then(function () {
+                if (onProgress) onProgress(total, total, null);
+            });
         }).then(function () {
             return self.initDefaults(manifest);
         });
