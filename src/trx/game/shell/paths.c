@@ -210,6 +210,24 @@ static VECTOR *m_DirCache = nullptr; // M_DIR_CACHE_ENTRY
 static VECTOR *m_ResolveCache = nullptr; // M_RESOLVE_CACHE_ENTRY
 static uint32_t m_ResolveCacheGeneration = 0;
 
+static void M_ClearDirCache(void)
+{
+    if (m_DirCache == nullptr) {
+        return;
+    }
+    for (int32_t i = 0; i < m_DirCache->count; i++) {
+        M_DIR_CACHE_ENTRY *const e = Vector_Get(m_DirCache, i);
+        for (int32_t j = 0; j < e->entries->count; j++) {
+            M_DIR_ENTRY *const de = Vector_Get(e->entries, j);
+            Memory_FreePointer(&de->name);
+        }
+        Vector_Free(e->entries);
+        Memory_FreePointer(&e->dir);
+    }
+    Vector_Free(m_DirCache);
+    m_DirCache = nullptr;
+}
+
 static void M_ClearResolveCache(void)
 {
     if (m_ResolveCache == nullptr) {
@@ -748,19 +766,7 @@ __attribute__((destructor)) static void M_Shutdown(void)
     Memory_FreePointer(&m_Context.screenshots_dir);
     Memory_FreePointer(&m_Context.saves_dir);
     Memory_FreePointer(&m_Context.legacy_saves_dir);
-    if (m_DirCache != nullptr) {
-        for (int32_t i = 0; i < m_DirCache->count; i++) {
-            M_DIR_CACHE_ENTRY *const e = Vector_Get(m_DirCache, i);
-            for (int32_t j = 0; j < e->entries->count; j++) {
-                M_DIR_ENTRY *const de = Vector_Get(e->entries, j);
-                Memory_FreePointer(&de->name);
-            }
-            Vector_Free(e->entries);
-            Memory_FreePointer(&e->dir);
-        }
-        Vector_Free(m_DirCache);
-        m_DirCache = nullptr;
-    }
+    M_ClearDirCache();
     M_ClearResolveCache();
     m_Context.args = nullptr;
     m_Context.mod_chain_count = 0;
@@ -771,6 +777,7 @@ void TRXPath_Init(const SHELL_ARGS *const args)
 {
     m_Context.args = args;
     m_ResolveCacheGeneration++;
+    M_ClearDirCache();
 
     if (m_Context.trx_dir == nullptr) {
         const char *const base = SDL_GetBasePath();
