@@ -21,10 +21,63 @@
     <div id="start-gate" class="hidden">
         <p>Press any key or button to continue</p>
     </div>
+
+    <div id="profile-selector" class="hidden">
+        <div class="profile-inner">
+            <h1>TRX</h1>
+            <p class="subtitle">Tomb Raider Engine</p>
+            <div id="profile-list"></div>
+            <div class="profile-actions">
+                <button id="btn-create-profile" type="button">+ New Profile</button>
+                <button id="btn-reset-defaults" type="button">Reset Defaults</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="create-profile-dialog" class="hidden">
+        <div class="profile-dialog-inner">
+            <h2>New Profile</h2>
+            <label>Name<input type="text" id="new-profile-name" placeholder="My Game"></label>
+            <label>Engine
+                <select id="new-profile-engine">
+                    <option value="">Select engine...</option>
+                    <option value="1">Tomb Raider I</option>
+                    <option value="2">Tomb Raider II</option>
+                    <option value="3">Tomb Raider III</option>
+                </select>
+            </label>
+            <label>Game
+                <select id="new-profile-mod" disabled>
+                    <option value="">Select game...</option>
+                </select>
+            </label>
+            <label>Description (optional)<input type="text" id="new-profile-desc" placeholder=""></label>
+            <div class="profile-dialog-buttons">
+                <button id="btn-create-confirm" type="button">Create</button>
+                <button id="btn-create-cancel" type="button">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="delete-profile-dialog" class="hidden">
+        <div class="profile-dialog-inner">
+            <h2>Delete Profile</h2>
+            <p id="delete-profile-text"></p>
+            <div id="delete-profile-spinner" class="hidden">
+                <div class="spinner"></div>
+                <p>Deleting...</p>
+            </div>
+            <div id="delete-profile-buttons" class="profile-dialog-buttons">
+                <button id="btn-delete-confirm" type="button">Delete</button>
+                <button id="btn-delete-cancel" type="button">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <div id="upload-screen" class="hidden">
         <div class="upload-inner">
             <h1>TRX</h1>
-            <p class="subtitle">Tomb Raider Engine &mdash; WebGL Build</p>
+            <p class="subtitle" id="upload-subtitle">Tomb Raider Engine &mdash; WebGL Build</p>
             <div id="upload-dropzone">
                 <p>Drag &amp; drop game files here</p>
                 <p class="upload-hint">Accepts: folder, .zip, or .tar.gz</p>
@@ -52,6 +105,9 @@
             <div id="upload-lang-select" class="hidden">
                 <p>Multiple audio languages detected. Please select one:</p>
                 <div id="upload-lang-list" class="lang-list"></div>
+            </div>
+            <div class="upload-buttons" style="margin-top: 1em;">
+                <button id="btn-upload-back" type="button" class="hidden">Back</button>
             </div>
         </div>
         <input type="file" id="file-input-folder" webkitdirectory multiple style="display:none">
@@ -86,8 +142,10 @@
 
     <script>
         var _trxCacheBust = '';  // __CACHE_BUST__
-        var _trxGameId = 'tr1';  // __GAME_ID__
         var _trxEngineStarting = false;
+        var _trxProfileManager = null;
+        var _trxCurrentProfile = null;
+        var _trxDefaultManifest = [];
         var Module = {
             noInitialRun: true,
             locateFile: function(path) {
@@ -99,56 +157,59 @@
                 var status = document.getElementById('status');
                 if (status) status.textContent = text;
                 // Parse progress from Emscripten status messages.
-                // Download phase occupies 0–50% of the bar.
                 var m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
                 if (m) {
-                    var pct = (parseFloat(m[2]) / parseFloat(m[4])) * 50;
+                    var pct = (parseFloat(m[2]) / parseFloat(m[4])) * 100;
                     var fill = document.getElementById('progress-fill');
                     if (fill) fill.style.width = pct + '%';
                 }
             },
             onRuntimeInitialized: function() {
-                // FS is ready (preloaded data mounted).  Decide whether to
-                // start the game immediately or show the upload UI.
-                var gdm = new GameDataManager(_trxGameId);
-                gdm.hasGameData().then(function(hasData) {
-                    if (hasData) {
-                        // Return visit — load from IndexedDB and start.
-                        // Game data loading occupies 50–100% of the bar.
-                        document.getElementById('status').textContent = 'Loading game data...';
-                        return gdm.loadToFS(function(loaded, total) {
-                            var pct = 50 + Math.round((loaded / total) * 50);
-                            document.getElementById('progress-fill').style.width = pct + '%';
-                            document.getElementById('status').textContent =
-                                'Loading game data... (' + loaded + '/' + total + ')';
-                        }).then(function() {
-                            _trxStartGame();
+                // FS is ready (preloaded data mounted).  Load profile manifest
+                // and decide whether to auto-start or show profile selector.
+                var pm = new ProfileManager();
+                _trxProfileManager = pm;
+
+                // Fetch profiles_defaults.json from the network (not VFS)
+                // so it is always fresh regardless of TRX.data caching.
+                var manifestUrl = 'profiles_defaults.json';
+                if (_trxCacheBust) manifestUrl += '?' + _trxCacheBust;
+
+                fetch(manifestUrl).then(function (resp) {
+                    return resp.ok ? resp.json() : [];
+                }).catch(function () {
+                    return [];
+                }).then(function (manifest) {
+                _trxDefaultManifest = manifest;
+
+                return pm.initDefaults(manifest);
+                }).then(function () {
+                    return pm.listProfiles();
+                }).then(function (profiles) {
+                    if (profiles.length === 1) {
+                        var p = profiles[0];
+                        if (p.dataPackage) {
+                            // Single profile with bundled data -> auto-start
+                            _trxStartGame(p);
+                            return;
+                        }
+                        // Check IDB for cached data (return visit)
+                        return pm.hasGameData(p.id).then(function (has) {
+                            if (has) {
+                                _trxStartGame(p);
+                            } else {
+                                document.getElementById('loading').classList.add('hidden');
+                                _trxShowProfileSelector();
+                            }
                         });
-                    } else if (gdm.hasPreloadedGameData()) {
-                        // Build includes game data — start immediately and
-                        // dump to IndexedDB in the background for offline use.
-                        _trxStartGame();
-                        setTimeout(function() {
-                            gdm.dumpPreloadedToIDB().then(function() {
-                                console.log('[TRX] Game data cached to IndexedDB for offline use.');
-                            }).catch(function(err) {
-                                console.warn('[TRX] Failed to cache game data:', err);
-                            });
-                        }, 2000);
-                    } else {
-                        // No game data anywhere — show upload UI.
-                        document.getElementById('loading').classList.add('hidden');
-                        _trxShowUploadUI(gdm);
                     }
-                }).catch(function(err) {
-                    console.error('[TRX] Game data check failed:', err);
-                    // Try to start anyway (might work if data was preloaded).
-                    if (gdm.hasPreloadedGameData()) {
-                        _trxStartGame();
-                    } else {
-                        document.getElementById('loading').classList.add('hidden');
-                        _trxShowUploadUI(gdm);
-                    }
+                    // Multiple profiles or none -> show selector
+                    document.getElementById('loading').classList.add('hidden');
+                    _trxShowProfileSelector();
+                }).catch(function (err) {
+                    console.error('[TRX] Profile init error:', err);
+                    document.getElementById('loading').classList.add('hidden');
+                    _trxShowProfileSelector();
                 });
             },
             print: function(text) { console.log(text); },
@@ -162,22 +223,367 @@
             }
         };
 
-        function _trxStartGame() {
-            // Keep #loading visible — the C code hides it via js_show_start_gate
-            // once initialization is complete.  The flag prevents Emscripten's
-            // setStatus('') from hiding it prematurely.
+        function _trxStartGame(profile) {
+            _trxCurrentProfile = profile;
             _trxEngineStarting = true;
-            document.getElementById('status').textContent = 'Starting engine...';
-            document.getElementById('progress-fill').style.width = '100%';
+            var pm = _trxProfileManager;
+
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('profile-selector').classList.add('hidden');
             document.getElementById('upload-screen').classList.add('hidden');
-            document.getElementById('canvas').focus();
-            if (typeof Module.syncViewportLayout === 'function') {
-                Module.syncViewportLayout();
+            document.getElementById('status').textContent = 'Loading...';
+            document.getElementById('progress-fill').style.width = '0%';
+
+            var modDef = MOD_DEFINITIONS[profile.mod];
+            var engine = modDef ? modDef.engine : profile.engine;
+
+            // Load game data if needed (bundled tar or IDB cache)
+            var dataReady;
+            if (profile.dataPackage) {
+                dataReady = pm.loadBundledToFS(profile.id, profile.dataPackage, function (msg, frac) {
+                    document.getElementById('status').textContent = msg;
+                    if (frac >= 0) {
+                        document.getElementById('progress-fill').style.width = Math.round(frac * 100) + '%';
+                    }
+                });
+            } else {
+                dataReady = pm.hasGameData(profile.id).then(function (has) {
+                    if (has) {
+                        document.getElementById('status').textContent = 'Loading cached data...';
+                        return pm.loadGameDataToFS(profile.id, function (loaded, total) {
+                            document.getElementById('progress-fill').style.width = Math.round((loaded / total) * 100) + '%';
+                        });
+                    }
+                });
             }
-            Module.callMain([]);
+
+            dataReady.then(function () {
+                document.getElementById('progress-fill').style.width = '100%';
+                document.getElementById('status').textContent = 'Starting...';
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('canvas').style.display = '';
+                document.getElementById('canvas').focus();
+                if (typeof Module.syncViewportLayout === 'function') {
+                    Module.syncViewportLayout();
+                }
+                if (pm) pm.updateLastPlayed(profile.id).catch(function () {});
+                Module.callMain(['--engine', String(engine), '--mod', profile.mod]);
+            }).catch(function (err) {
+                console.error('[TRX] Failed to load game data:', err);
+                document.getElementById('status').textContent = 'Error: ' + (err.message || 'Failed to load game data');
+            });
         }
 
-        function _trxShowUploadUI(gdm) {
+        function _trxResumeWithProfile(profile) {
+            // Called when returning from Exit Game via profile selector.
+            // Load game data if needed, then signal C code.
+            var pm = _trxProfileManager;
+            _trxCurrentProfile = profile;
+            var modDef = MOD_DEFINITIONS[profile.mod];
+            var engine = modDef ? modDef.engine : profile.engine;
+
+            document.getElementById('profile-selector').classList.add('hidden');
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('status').textContent = 'Loading...';
+            document.getElementById('progress-fill').style.width = '0%';
+
+            var dataReady;
+            if (profile.dataPackage) {
+                dataReady = pm.loadBundledToFS(profile.id, profile.dataPackage, function (msg, frac) {
+                    document.getElementById('status').textContent = msg;
+                    if (frac >= 0) {
+                        document.getElementById('progress-fill').style.width = Math.round(frac * 100) + '%';
+                    }
+                });
+            } else {
+                dataReady = pm.hasGameData(profile.id).then(function (has) {
+                    if (has) return pm.loadGameDataToFS(profile.id);
+                });
+            }
+
+            dataReady.then(function () {
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('canvas').style.display = '';
+                if (pm) pm.updateLastPlayed(profile.id).catch(function () {});
+                if (Module._profileCallback) {
+                    Module._profileCallback(profile.mod, engine);
+                }
+            }).catch(function (err) {
+                console.error('[TRX] Failed to load profile data:', err);
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('canvas').style.display = '';
+                if (Module._profileCallback) {
+                    Module._profileCallback(profile.mod, engine);
+                }
+            });
+        }
+
+        // Show profile selector overlay. Used on initial load and when
+        // returning from Exit Game (called from C via EM_JS).
+        Module.showProfileSelector = function (callback) {
+            Module._profileCallback = callback;
+            _trxEngineStarting = false;
+            _trxShowProfileSelector(callback);
+        };
+
+        function _trxShowProfileSelector(callback) {
+            var selector = document.getElementById('profile-selector');
+            var listEl = document.getElementById('profile-list');
+            var pm = _trxProfileManager;
+
+            selector.classList.remove('hidden');
+            document.getElementById('canvas').style.display = 'none';
+
+            function refresh() {
+                pm.listProfiles().then(function (profiles) {
+                    // Sort: defaults first (by engine), then user profiles
+                    profiles.sort(function (a, b) {
+                        if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+                        return (a.engine || 0) - (b.engine || 0);
+                    });
+                    _trxRenderProfileList(profiles, listEl, callback, refresh);
+                });
+            }
+
+            refresh();
+
+            // Create profile button
+            var createBtn = document.getElementById('btn-create-profile');
+            // Remove old listener by cloning
+            var newBtn = createBtn.cloneNode(true);
+            createBtn.parentNode.replaceChild(newBtn, createBtn);
+            newBtn.addEventListener('click', function () {
+                _trxShowCreateProfileDialog(function (profile) {
+                    refresh();
+                });
+            });
+
+            // Reset defaults button
+            var resetBtn = document.getElementById('btn-reset-defaults');
+            var newResetBtn = resetBtn.cloneNode(true);
+            resetBtn.parentNode.replaceChild(newResetBtn, resetBtn);
+            newResetBtn.addEventListener('click', function () {
+                if (!confirm('Reset all default profiles?\n\nThis will clear cached game data and re-add any deleted defaults. Game data will be re-downloaded on next play.\n\nSave data and settings are not affected.')) return;
+                pm.resetDefaults(_trxDefaultManifest).then(function () {
+                    window.location.reload();
+                });
+            });
+        }
+
+        function _trxRenderProfileList(profiles, listEl, callback, refresh) {
+            var pm = _trxProfileManager;
+            listEl.innerHTML = '';
+
+            for (var i = 0; i < profiles.length; i++) {
+                (function (profile) {
+                    var card = document.createElement('div');
+                    card.className = 'profile-card';
+
+                    var modDef = MOD_DEFINITIONS[profile.mod] || {};
+                    var engineLabel = 'TR' + (profile.engine || '?');
+
+                    var info = document.createElement('div');
+                    info.className = 'profile-info';
+
+                    var nameRow = document.createElement('div');
+                    nameRow.className = 'profile-name-row';
+
+                    var badge = document.createElement('span');
+                    badge.className = 'profile-badge';
+                    badge.textContent = engineLabel;
+                    nameRow.appendChild(badge);
+
+                    var nameEl = document.createElement('span');
+                    nameEl.className = 'profile-name';
+                    nameEl.textContent = profile.name;
+                    nameRow.appendChild(nameEl);
+
+                    info.appendChild(nameRow);
+
+                    if (profile.description) {
+                        var desc = document.createElement('div');
+                        desc.className = 'profile-desc';
+                        desc.textContent = profile.description;
+                        info.appendChild(desc);
+                    }
+
+                    card.appendChild(info);
+
+                    // Clicking the card launches the game.
+                    card.addEventListener('click', function () {
+                        // Show loading screen immediately for responsiveness.
+                        document.getElementById('profile-selector').classList.add('hidden');
+                        document.getElementById('loading').classList.remove('hidden');
+                        document.getElementById('status').textContent = 'Loading...';
+                        document.getElementById('progress-fill').style.width = '0%';
+
+                        pm.hasGameData(profile.id).then(function (hasIDB) {
+                            if (hasIDB || profile.dataPackage) {
+                                if (callback) {
+                                    _trxResumeWithProfile(profile);
+                                } else {
+                                    _trxStartGame(profile);
+                                }
+                            } else {
+                                // No game data — show upload UI
+                                document.getElementById('loading').classList.add('hidden');
+                                _trxShowUploadUI(profile, callback, refresh);
+                            }
+                        });
+                    });
+
+                    var actions = document.createElement('div');
+                    actions.className = 'profile-card-actions';
+
+                    var deleteBtn = document.createElement('button');
+                    deleteBtn.type = 'button';
+                    deleteBtn.className = 'profile-delete';
+                    deleteBtn.textContent = 'Delete';
+                    deleteBtn.addEventListener('click', function (e) {
+                        e.stopPropagation();
+                        _trxShowDeleteDialog(profile, refresh);
+                    });
+                    actions.appendChild(deleteBtn);
+
+                    card.appendChild(actions);
+                    listEl.appendChild(card);
+                })(profiles[i]);
+            }
+
+            if (profiles.length === 0) {
+                var empty = document.createElement('p');
+                empty.className = 'profile-empty';
+                empty.textContent = 'No profiles yet. Create one to get started.';
+                listEl.appendChild(empty);
+            }
+        }
+
+        // Game options per engine version for the create-profile dialog.
+        var _trxGamesByEngine = {
+            '1': [
+                { mod: 'tr1',       label: 'Original Game' },
+                { mod: 'tr1-ub',    label: 'Unfinished Business' },
+                { mod: 'tr1-level', label: 'Custom Level' },
+            ],
+            '2': [
+                { mod: 'tr2',       label: 'Original Game' },
+                { mod: 'tr2-gm',    label: 'The Golden Mask' },
+                { mod: 'tr2-level', label: 'Custom Level' },
+            ],
+            '3': [
+                { mod: 'tr3',       label: 'Original Game' },
+                { mod: 'tr3-la',    label: 'The Lost Artifact' },
+                { mod: 'tr3-level', label: 'Custom Level' },
+            ],
+        };
+
+        function _trxShowDeleteDialog(profile, refresh) {
+            var dialog = document.getElementById('delete-profile-dialog');
+            var text = document.getElementById('delete-profile-text');
+            var spinner = document.getElementById('delete-profile-spinner');
+            var buttons = document.getElementById('delete-profile-buttons');
+            var confirmBtn = document.getElementById('btn-delete-confirm');
+            var cancelBtn = document.getElementById('btn-delete-cancel');
+
+            text.textContent = 'Delete profile \u201c' + profile.name + '\u201d and all its game data?';
+            spinner.classList.add('hidden');
+            buttons.classList.remove('hidden');
+            dialog.classList.remove('hidden');
+
+            function cleanup() {
+                dialog.classList.add('hidden');
+                confirmBtn.removeEventListener('click', onConfirm);
+                cancelBtn.removeEventListener('click', onCancel);
+            }
+
+            function onConfirm() {
+                confirmBtn.removeEventListener('click', onConfirm);
+                cancelBtn.removeEventListener('click', onCancel);
+                buttons.classList.add('hidden');
+                spinner.classList.remove('hidden');
+                _trxProfileManager.deleteProfile(profile.id).then(function () {
+                    cleanup();
+                    refresh();
+                });
+            }
+
+            function onCancel() {
+                cleanup();
+            }
+
+            confirmBtn.addEventListener('click', onConfirm);
+            cancelBtn.addEventListener('click', onCancel);
+        }
+
+        function _trxShowCreateProfileDialog(onCreated) {
+            var dialog = document.getElementById('create-profile-dialog');
+            var nameInput = document.getElementById('new-profile-name');
+            var engineSelect = document.getElementById('new-profile-engine');
+            var modSelect = document.getElementById('new-profile-mod');
+            var descInput = document.getElementById('new-profile-desc');
+
+            dialog.classList.remove('hidden');
+            nameInput.value = '';
+            descInput.value = '';
+            engineSelect.value = '';
+            modSelect.innerHTML = '<option value="">Select game...</option>';
+            modSelect.disabled = true;
+            nameInput.focus();
+
+            function onEngineChange() {
+                var engine = engineSelect.value;
+                modSelect.innerHTML = '<option value="">Select game...</option>';
+                if (engine && _trxGamesByEngine[engine]) {
+                    var games = _trxGamesByEngine[engine];
+                    for (var i = 0; i < games.length; i++) {
+                        var opt = document.createElement('option');
+                        opt.value = games[i].mod;
+                        opt.textContent = games[i].label;
+                        modSelect.appendChild(opt);
+                    }
+                    modSelect.disabled = false;
+                } else {
+                    modSelect.disabled = true;
+                }
+            }
+
+            var confirmBtn = document.getElementById('btn-create-confirm');
+            var cancelBtn = document.getElementById('btn-create-cancel');
+
+            function cleanup() {
+                dialog.classList.add('hidden');
+                engineSelect.removeEventListener('change', onEngineChange);
+                confirmBtn.removeEventListener('click', onConfirm);
+                cancelBtn.removeEventListener('click', onCancel);
+            }
+
+            function onConfirm() {
+                var name = nameInput.value.trim();
+                if (!name) { nameInput.focus(); return; }
+                if (!modSelect.value) { modSelect.focus(); return; }
+                var mod = modSelect.value;
+                var desc = descInput.value.trim();
+
+                _trxProfileManager.createProfile({
+                    name: name,
+                    mod: mod,
+                    description: desc,
+                }).then(function (profile) {
+                    cleanup();
+                    if (onCreated) onCreated(profile);
+                });
+            }
+
+            function onCancel() {
+                cleanup();
+            }
+
+            engineSelect.addEventListener('change', onEngineChange);
+            confirmBtn.addEventListener('click', onConfirm);
+            cancelBtn.addEventListener('click', onCancel);
+        }
+
+        function _trxShowUploadUI(profile, callback, refresh) {
             var screen = document.getElementById('upload-screen');
             var dropzone = document.getElementById('upload-dropzone');
             var progressDiv = document.getElementById('upload-progress');
@@ -186,8 +592,19 @@
             var errorEl = document.getElementById('upload-error');
             var folderInput = document.getElementById('file-input-folder');
             var archiveInput = document.getElementById('file-input-archive');
+            var backBtn = document.getElementById('btn-upload-back');
+            var subtitle = document.getElementById('upload-subtitle');
 
+            document.getElementById('profile-selector').classList.add('hidden');
             screen.classList.remove('hidden');
+            subtitle.textContent = 'Upload game data for: ' + profile.name;
+            backBtn.classList.remove('hidden');
+
+            // Reset state
+            progressDiv.classList.add('hidden');
+            errorEl.classList.add('hidden');
+
+            var gdm = new GameDataManager(profile.mod);
 
             function showError(msg) {
                 errorEl.textContent = msg;
@@ -266,8 +683,30 @@
                 gdm.processUpload(files, function(msg, frac) {
                     progressFill.style.width = Math.round(frac * 100) + '%';
                     progressText.textContent = msg;
-                }, showWarning, showLanguageSelect).then(function() {
-                    _trxStartGame();
+                }, showWarning, showLanguageSelect).then(function(mappedFiles) {
+                    progressText.textContent = 'Saving to browser storage...';
+                    progressFill.style.width = '80%';
+
+                    // Store in IDB via ProfileManager
+                    return _trxProfileManager.storeGameData(profile.id, mappedFiles, function (stored, total) {
+                        var pct = 80 + Math.round((stored / total) * 15);
+                        progressFill.style.width = pct + '%';
+                    }).then(function () {
+                        // Load into FS
+                        progressText.textContent = 'Loading into game...';
+                        progressFill.style.width = '95%';
+                        gdm.loadMappedToFS(mappedFiles);
+                        progressText.textContent = 'Done!';
+                        progressFill.style.width = '100%';
+
+                        // Start the game
+                        screen.classList.add('hidden');
+                        if (callback) {
+                            _trxResumeWithProfile(profile);
+                        } else {
+                            _trxStartGame(profile);
+                        }
+                    });
                 }).catch(function(err) {
                     progressDiv.classList.add('hidden');
                     if (err.message === 'Upload cancelled.') return;
@@ -312,6 +751,15 @@
             });
             archiveInput.addEventListener('change', function() {
                 handleFiles(archiveInput.files);
+            });
+
+            // Back button
+            var newBackBtn = backBtn.cloneNode(true);
+            backBtn.parentNode.replaceChild(newBackBtn, backBtn);
+            newBackBtn.classList.remove('hidden');
+            newBackBtn.addEventListener('click', function () {
+                screen.classList.add('hidden');
+                _trxShowProfileSelector(callback);
             });
         }
 
@@ -438,17 +886,44 @@
             Module.setStatus('Exception thrown - see JavaScript console');
         };
 
-        // Let F11 pass through to the browser for native fullscreen toggle.
-        // SDL/Emscripten normally captures all key events and calls
-        // preventDefault(), which blocks the browser's native F11 handling.
-        // By intercepting in the capture phase and stopping propagation,
-        // the browser handles F11 natively (where ESC does not exit
-        // fullscreen, unlike the JavaScript Fullscreen API).
-        document.addEventListener('keydown', function(e) {
+        // SDL keyboard handling is restricted to #canvas via
+        // SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT, so form inputs work
+        // naturally.  This forwarder re-dispatches keyboard events to
+        // the canvas when the game is running (no overlay visible and
+        // no form element focused), so the game receives input without
+        // requiring the canvas to have focus.
+        function _trxForwardKey(e) {
+            // Let F11 pass through to the browser for native fullscreen.
             if (e.code === 'F11') {
                 e.stopImmediatePropagation();
+                return;
             }
-        }, true);
+
+            // Don't forward when a form element has focus.
+            var active = document.activeElement;
+            if (active && (active.tagName === 'INPUT' || active.tagName === 'SELECT' || active.tagName === 'TEXTAREA')) {
+                return;
+            }
+
+            var canvas = document.getElementById('canvas');
+            if (!canvas || canvas.style.display === 'none') return;
+
+            // Don't forward if already targeting the canvas.
+            if (e.target === canvas) return;
+
+            // Don't forward when an overlay is visible.
+            var overlays = ['start-gate', 'profile-selector', 'create-profile-dialog', 'delete-profile-dialog', 'upload-screen', 'loading'];
+            for (var i = 0; i < overlays.length; i++) {
+                var el = document.getElementById(overlays[i]);
+                if (el && !el.classList.contains('hidden')) return;
+            }
+
+            canvas.dispatchEvent(new KeyboardEvent(e.type, e));
+            e.stopPropagation();
+            e.preventDefault();
+        }
+        document.addEventListener('keydown', _trxForwardKey, true);
+        document.addEventListener('keyup', _trxForwardKey, true);
 
         // Ensure canvas keeps focus during fullscreen transitions so SDL's
         // event handlers capture all keyboard input (including Escape).
@@ -585,7 +1060,7 @@
                     return;
                 }
                 var role = btn.getAttribute('data-role');
-                var activeTouches = {};  // touchId → true
+                var activeTouches = {};  // touchId -> true
 
                 btn.addEventListener('touchstart', function(e) {
                     e.preventDefault();
@@ -635,6 +1110,7 @@
     </script>
     <script src="vendor/fflate.min.js"></script>
     <script src="gamedata.js"></script>
+    <script src="profiles.js"></script>
     {{{ SCRIPT }}}
 </body>
 </html>

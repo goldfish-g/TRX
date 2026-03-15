@@ -46,6 +46,7 @@
 
 #include <SDL2/SDL.h>
 #include <stdio.h>
+#include <string.h>
 
 static SHELL_SESSION *m_Session = nullptr;
 static SDL_Window *m_Window = nullptr;
@@ -111,6 +112,7 @@ static void M_SetupSDL(void)
     if (SDL_Init(SDL_INIT_EVENTS | SDL_INIT_VIDEO) < 0) {
         Shell_ExitSystemFmt("Cannot initialize SDL: %s", SDL_GetError());
     }
+    Shell_PostSDLInit();
 }
 
 static void M_SetupGL(void)
@@ -470,7 +472,25 @@ int32_t Shell_Main(const SHELL_ARGS *const args)
             }
             break;
 
-        case GF_EXIT_GAME:
+        case GF_EXIT_GAME: {
+            char mod_buf[32] = { 0 };
+            int32_t engine = 0;
+            Shell_ShowProfileSelector(mod_buf, sizeof(mod_buf), &engine);
+            if (mod_buf[0] != '\0') {
+                if (strcmp(mod_buf, s->args->mod->name) == 0) {
+                    // Same mod selected — just restart the title screen
+                    // rather than tearing down and reinitializing the
+                    // engine, which would fail (e.g. IDBFS double-mount).
+                    gf_cmd = (GF_COMMAND) { .action = GF_EXIT_TO_TITLE };
+                    break;
+                }
+                Shell_RequestModSwitch(mod_buf);
+                gf_cmd.action = GF_SWITCH_MOD;
+            }
+            loop_continue = false;
+            break;
+        }
+
         case GF_SWITCH_MOD:
             loop_continue = false;
             break;
