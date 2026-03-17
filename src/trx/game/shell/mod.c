@@ -1,7 +1,9 @@
 #include <trx/game/shell/mod.h>
 
 #include <trx/core/filesystem.h>
+#include <trx/core/memory.h>
 #include <trx/core/strings.h>
+#include <trx/core/vector.h>
 #include <trx/debug.h>
 #include <trx/game/shell/common.h>
 #include <trx/game/shell/paths.h>
@@ -104,6 +106,45 @@ void Shell_ScanAvailableMods(void)
     }
 }
 
+static VECTOR *m_DynamicMods = nullptr;
+
+static const SHELL_MOD *M_TryDiscoverMod(const char *const name)
+{
+    int32_t engine_version = 0;
+    const char *base_mod = nullptr;
+
+    if (strncmp(name, "tr1-level-", 10) == 0) {
+        engine_version = 1;
+        base_mod = "tr1";
+    } else if (strncmp(name, "tr2-level-", 10) == 0) {
+        engine_version = 2;
+        base_mod = "tr2";
+    } else if (strncmp(name, "tr3-level-", 10) == 0) {
+        engine_version = 3;
+        base_mod = "tr3";
+    } else {
+        return nullptr;
+    }
+
+    if (!TRXPath_Exists(TRX_DYNAMIC_PATH_GAMEFLOW_FILE, name)) {
+        return nullptr;
+    }
+
+    if (m_DynamicMods == nullptr) {
+        m_DynamicMods = Vector_Create(sizeof(SHELL_MOD));
+    }
+
+    SHELL_MOD mod = {
+        .name = Memory_DupStr(name),
+        .mod_type = MOD_DIRECT_LEVEL,
+        .engine_version = engine_version,
+        .base_mod = base_mod,
+        .is_available = true,
+    };
+    Vector_Add(m_DynamicMods, &mod);
+    return Vector_Get(m_DynamicMods, m_DynamicMods->count - 1);
+}
+
 const SHELL_MOD *Shell_GetModByName(const char *const name)
 {
     for (int32_t i = 0; m_KnownMods[i].name != nullptr; i++) {
@@ -112,7 +153,17 @@ const SHELL_MOD *Shell_GetModByName(const char *const name)
             return &m_KnownMods[i];
         }
     }
-    return nullptr;
+
+    if (m_DynamicMods != nullptr) {
+        for (int32_t i = 0; i < m_DynamicMods->count; i++) {
+            const SHELL_MOD *const mod = Vector_Get(m_DynamicMods, i);
+            if (mod->is_available && strcmp(mod->name, name) == 0) {
+                return mod;
+            }
+        }
+    }
+
+    return M_TryDiscoverMod(name);
 }
 
 const SHELL_MOD *Shell_GetModByType(
