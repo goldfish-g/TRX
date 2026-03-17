@@ -17,7 +17,7 @@
 var GameDataManager = (function () {
     // Game file extensions we care about, grouped by destination directory.
     var LEVEL_EXTS = ['.phd', '.tr2', '.psx', '.tub'];
-    var MUSIC_EXTS = ['.flac', '.ogg', '.mp3', '.wav'];
+    var MUSIC_EXTS = ['.flac', '.ogg', '.mp3', '.wav', '.wma'];
     var SFX_EXTS   = ['.sfx'];
     var FMV_EXTS   = ['.mp4', '.rpl', '.ogv', '.avi', '.fmv'];
     var AUDIO_EXTS = ['.wad'];  // cdaudio.wad for TR3
@@ -386,8 +386,41 @@ var GameDataManager = (function () {
         }
 
         // --- Config files (.json5) — gameflow, strings ---
-        // Only map root-level json5 files (not inside subdirectories).
-        if (ext === '.json5' && lowerPath.indexOf('/') === -1) {
+        // Map root-level json5 files directly, and also TR2X-style
+        // cfg/<game>-level/*.json5 files (e.g. cfg/tr2-level/gameflow.json5).
+        // Only match the -level variant to avoid collisions with cfg/tr2/
+        // or cfg/tr2-gm/ which contain full game gameflows.
+        if (ext === '.json5'
+            && (lowerPath.indexOf('/') === -1
+                || /^cfg\/tr\d-level\//.test(lowerPath))) {
+            return prefix + lowerBase;
+        }
+        // Also preserve the full game gameflow (cfg/tr2/gameflow.json5)
+        // under _meta/ — used to extract music_track and injections
+        // for TR2X custom levels.
+        if (ext === '.json5' && lowerBase === 'gameflow.json5'
+            && /^cfg\/tr\d\//.test(lowerPath)) {
+            return prefix + '_meta/fullgameflow.json5';
+        }
+
+        // --- Injection data (.bin) ---
+        // Files from injections/ directories go to injections/ subdirectory.
+        // Other .bin files go to the mod root.
+        if (ext === '.bin') {
+            if (lowerPath.indexOf('injections/') !== -1) {
+                return prefix + 'injections/' + lowerBase;
+            }
+            return prefix + lowerBase;
+        }
+
+        // --- Images (.webp, .png, .jpg, .bmp, .pcx) ---
+        if (ext === '.webp' || ext === '.png' || ext === '.jpg'
+            || ext === '.bmp' || ext === '.pcx') {
+            return prefix + 'images/' + lowerBase;
+        }
+
+        // --- Script data (TOMBPC.DAT — classic TR2/TR3 game script) ---
+        if (lowerBase === 'tombpc.dat') {
             return prefix + lowerBase;
         }
 

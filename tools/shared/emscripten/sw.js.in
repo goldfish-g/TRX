@@ -9,6 +9,7 @@ var PRECACHE_URLS = [
     'TRX.wasm',
     'shell.css',
     'gamedata.js',
+    'profiles.js',
     'vendor/fflate.min.js',
     'manifest.webmanifest',
     'icon-192.png',
@@ -23,7 +24,12 @@ function shouldSkip(url) {
 self.addEventListener('install', function(event) {
     event.waitUntil(
         caches.open(CACHE_NAME).then(function(cache) {
-            return cache.addAll(PRECACHE_URLS);
+            // Bypass HTTP cache during precache to avoid stale files.
+            // Cannot use no-store on the server as the Cache API
+            // rejects such responses.
+            return cache.addAll(PRECACHE_URLS.map(function(url) {
+                return new Request(url, { cache: 'reload' });
+            }));
         }).then(function() {
             return self.skipWaiting();
         })

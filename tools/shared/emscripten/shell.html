@@ -249,6 +249,178 @@
             return JSON.parse(text);
         }
 
+        // Parse a TR2 TOMBPC.DAT game script to extract level filenames,
+        // titles, and music track assignments.  Returns an object with
+        // filenames[], levelTitles[], and musicTracks[], or null on failure.
+        // The file is NOT XOR-encrypted at the file level; only the string
+        // data blocks use the per-file cypher code stored in the options.
+        function _trxParseTR2Script(rawData) {
+            try {
+                var data = new Uint8Array(rawData);
+                var view = new DataView(data.buffer);
+
+                // --- Header ---
+                var version = view.getUint32(0, true);
+                if (version !== 3) return null;
+                var optSize = view.getUint16(260, true);
+                var optStart = 262;
+
+                // --- Options block (128 bytes for TR2) ---
+                var numLevels = view.getUint16(optStart + 64, true);
+                var numCutscenes = view.getUint16(optStart + 72, true);
+                var titleSoundId = view.getUint16(optStart + 76, true);
+                var cypher = data[optStart + 120];
+                var secretSoundId = view.getUint16(optStart + 122, true);
+                if (numLevels < 2 || numLevels > 100) return null;
+
+                // --- String block reader ---
+                function readBlock(pos, count) {
+                    var offsets = [];
+                    for (var i = 0; i < count; i++)
+                        offsets.push(view.getUint16(pos + i * 2, true));
+                    pos += count * 2;
+                    var dlen = view.getUint16(pos, true); pos += 2;
+                    var strings = [];
+                    for (var i = 0; i < count; i++) {
+                        var j = pos + offsets[i];
+                        var s = '';
+                        while (j < pos + dlen) {
+                            var ch = data[j] ^ cypher;
+                            j++;
+                            if (ch === 0) break;
+                            s += String.fromCharCode(ch);
+                        }
+                        strings.push(s);
+                    }
+                    return { strings: strings, end: pos + dlen };
+                }
+
+                // --- Level titles (first block after options) ---
+                var pos = optStart + optSize;
+                var titleBlock = readBlock(pos, numLevels);
+                var levelTitles = titleBlock.strings;
+
+                // --- Scan for level filenames block ---
+                // It is the first block of numLevels ascending offsets where
+                // every decrypted string is clean ASCII containing a level
+                // file extension (.TR2, .PHD, etc.).
+                var filenames = null;
+                var fnEndPos = 0;
+                for (var sp = titleBlock.end;
+                     sp < data.length - numLevels * 2 - 4; sp++) {
+                    var first = view.getUint16(sp, true);
+                    if (first !== 0) continue;
+                    var ok = true;
+                    for (var k = 1; k < numLevels; k++) {
+                        if (view.getUint16(sp + k * 2, true)
+                            <= view.getUint16(sp + (k - 1) * 2, true)) {
+                            ok = false; break;
+                        }
+                    }
+                    if (!ok) continue;
+                    try {
+                        var blk = readBlock(sp, numLevels);
+                        var allValid = true;
+                        for (var k = 0; k < blk.strings.length; k++) {
+                            var s = blk.strings[k];
+                            var sl = s.toLowerCase();
+                            if (sl.indexOf('.tr2') < 0
+                                && sl.indexOf('.phd') < 0
+                                && sl.indexOf('.tub') < 0
+                                && sl.indexOf('.psx') < 0) {
+                                allValid = false; break;
+                            }
+                            for (var c = 0; c < s.length; c++) {
+                                var cc = s.charCodeAt(c);
+                                if (cc < 32 || cc > 126) {
+                                    allValid = false; break;
+                                }
+                            }
+                            if (!allValid) break;
+                        }
+                        if (allValid) {
+                            filenames = blk.strings;
+                            fnEndPos = blk.end;
+                            break;
+                        }
+                    } catch (e) {}
+                }
+                if (!filenames) return null;
+
+                // --- Skip cutscene filenames ---
+                var scriptPos = fnEndPos;
+                if (numCutscenes > 0) {
+                    try {
+                        var cutBlk = readBlock(scriptPos, numCutscenes);
+                        scriptPos = cutBlk.end;
+                    } catch (e) {}
+                }
+
+                // --- Script sequences (music track extraction) ---
+                var scriptOffsets = [];
+                for (var i = 0; i <= numLevels; i++) {
+                    scriptOffsets.push(
+                        view.getUint16(scriptPos + i * 2, true));
+                }
+                scriptPos += (numLevels + 1) * 2;
+                var scriptSize = view.getUint16(scriptPos, true);
+                scriptPos += 2;
+                var scriptBase = scriptPos;
+
+                var OP_HAS_ARG = {
+                    0x0000:1, 0x0003:1, 0x0004:1, 0x0005:1,
+                    0x0007:1, 0x0008:1, 0x000A:1, 0x000C:1
+                };
+                // Each sequence's SETTRACK + LEVEL opcodes define which
+                // music track plays for which level FILE.  The LEVEL
+                // opcode target (file index) maps the track, not the
+                // sequence index.
+                var musicTracks = [];
+                for (var i = 0; i < numLevels; i++)
+                    musicTracks.push(-1);
+                for (var seq = 0; seq < numLevels; seq++) {
+                    var sStart = scriptBase + scriptOffsets[seq];
+                    var sEnd = scriptBase + scriptOffsets[seq + 1];
+                    var track = -1;
+                    var levelTarget = -1;
+                    for (var p = sStart; p + 1 < sEnd; ) {
+                        var op = view.getUint16(p, true); p += 2;
+                        if (op === 0x0009) break;
+                        if (OP_HAS_ARG[op]) {
+                            var arg = p + 1 < sEnd
+                                ? view.getUint16(p, true) : -1;
+                            if (op === 0x000A) track = arg;
+                            if (op === 0x0004) levelTarget = arg;
+                            p += 2;
+                        }
+                    }
+                    if (track >= 0 && levelTarget >= 0
+                        && levelTarget < numLevels) {
+                        musicTracks[levelTarget] = track;
+                    } else if (track >= 0 && levelTarget < 0) {
+                        musicTracks[seq] = track;
+                    }
+                }
+
+                // TOMBPC.DAT uses CD audio trigger indices where
+                // the first audio track starts at index 4.  Derive
+                // the offset from the title track (always file 60 in
+                // standard TR2).
+                var cdOffset = titleSoundId > 0
+                    ? titleSoundId - 60 : 4;
+
+                return {
+                    filenames: filenames,
+                    levelTitles: levelTitles,
+                    musicTracks: musicTracks,
+                    titleSoundId: titleSoundId,
+                    cdOffset: cdOffset,
+                };
+            } catch (e) {
+                return null;
+            }
+        }
+
         // Set up the gameflow + strings for a custom level profile.
         // If the upload already contains a gameflow.json5 (TRX-native custom
         // level), it is used as-is.  Otherwise one is generated from the
@@ -256,9 +428,11 @@
         function _trxSetupCustomGameflow(mappedFiles, modDir, templateMod) {
             var modPrefix = 'games/' + modDir + '/';
 
-            // Check if the upload already included a gameflow.json5.
+            // Check if the upload already included a gameflow.json5 or
+            // a classic game script (TOMBPC.DAT).
             var hasGameflow = false;
             var hasStrings = false;
+            var scriptEntry = null;
             for (var i = 0; i < mappedFiles.length; i++) {
                 if (mappedFiles[i].path === modPrefix + 'gameflow.json5') {
                     hasGameflow = true;
@@ -267,17 +441,272 @@
                     && mappedFiles[i].path.endsWith('.json5')) {
                     hasStrings = true;
                 }
+                if (mappedFiles[i].path === modPrefix + 'tombpc.dat') {
+                    scriptEntry = mappedFiles[i];
+                }
             }
 
             if (hasGameflow) {
-                // TRX-native level — copy missing strings from template only
+                // TRX-native level — patch missing required fields and
+                // generate strings that match the provided level count.
+                var gfEntry = null;
+                for (var i = 0; i < mappedFiles.length; i++) {
+                    if (mappedFiles[i].path === modPrefix + 'gameflow.json5') {
+                        gfEntry = mappedFiles[i];
+                        break;
+                    }
+                }
+                var gfText = new TextDecoder().decode(gfEntry.data);
+
+                // Detect TR2X template gameflows (have PLACEHOLDER paths,
+                // data/injections/ prefixes, etc.) — these are incompatible
+                // with TRX and should be skipped in favour of auto-generation.
+                if (gfText.indexOf('"PLACEHOLDER"') !== -1) {
+                    // Look for the full gameflow (cfg/tr2/ or cfg/tr1/)
+                    // which has correct music_track, injections, etc.
+                    var fullGfData = null;
+                    var fullGfPath = modPrefix + '_meta/fullgameflow.json5';
+                    for (var fi = 0; fi < mappedFiles.length; fi++) {
+                        if (mappedFiles[fi].path === fullGfPath) {
+                            fullGfData = mappedFiles[fi].data;
+                            break;
+                        }
+                    }
+                    if (fullGfData) {
+                        var fullText = new TextDecoder().decode(fullGfData);
+                        var fullGf = _trxParseJSON5(fullText);
+                        // Build set of uploaded level filenames
+                        var uploadedLevels = {};
+                        for (var fi = 0; fi < mappedFiles.length; fi++) {
+                            var p = mappedFiles[fi].path;
+                            if (p.indexOf(modPrefix + 'levels/') === 0) {
+                                var fn = p.split('/').pop();
+                                uploadedLevels[fn] = true;
+                            }
+                        }
+                        // Filter to levels that have uploaded files
+                        var filteredLevels = [];
+                        var titleEntry = null;
+                        var fullLevels = fullGf.levels || [];
+                        for (var li = 0; li < fullLevels.length; li++) {
+                            var src = fullLevels[li];
+                            var lvlPath = (src.path || '').split('/').pop().toLowerCase();
+                            if (!uploadedLevels[lvlPath]) continue;
+                            // Build clean level entry with only TRX fields
+                            var lvl = {
+                                path: lvlPath,
+                                music_track: src.music_track != null ? src.music_track : -1,
+                                lara_outfit: src.lara_outfit || 'tr2_classic',
+                                sequence: src.sequence || [],
+                            };
+                            // Clean injection paths
+                            if (src.injections) {
+                                lvl.injections = src.injections.map(function(p) {
+                                    return p.split('/').pop();
+                                });
+                            }
+                            // Title/gym level → set as root-level title
+                            if (src.type === 'gym_home' || lvlPath === 'title.tr2') {
+                                titleEntry = {
+                                    path: lvlPath,
+                                    music_track: -1,
+                                    sequence: [
+                                        { type: 'exit_to_title' },
+                                    ],
+                                };
+                            } else {
+                                filteredLevels.push(lvl);
+                            }
+                        }
+                        if (filteredLevels.length > 0) {
+                            // Read template for base fields
+                            var tplText = new TextDecoder().decode(
+                                FS.readFile('/games/' + templateMod + '/gameflow.json5'));
+                            var tplGf = _trxParseJSON5(tplText);
+                            tplGf.levels = filteredLevels;
+                            // Use the full gameflow's root title section if
+                            // available — it has the correct music_track.
+                            if (fullGf.title) {
+                                var ft = fullGf.title;
+                                titleEntry = {
+                                    path: (ft.path || '').split('/').pop().toLowerCase(),
+                                    music_track: ft.music_track != null ? ft.music_track : -1,
+                                    sequence: [{ type: 'exit_to_title' }],
+                                };
+                            }
+                            if (titleEntry) {
+                                tplGf.title = titleEntry;
+                            }
+                            // Keep the template's global injections — they
+                            // include TRX-required files like lara_outfits.bin
+                            // that the TR2X gameflow doesn't have. Per-level
+                            // injections (music_tracks, textures) are already
+                            // in each level entry.
+                            var gfJson = JSON.stringify(tplGf, null, 4);
+                            var gfBytes = new TextEncoder().encode(gfJson);
+                            _trxWriteToVFS(gfEntry.path, gfBytes);
+                            gfEntry.data = gfBytes;
+                            // Always regenerate strings — the TR2X template
+                            // strings don't match our filtered level count.
+                            {
+                                _trxGenerateStrings(mappedFiles, modDir, templateMod,
+                                    filteredLevels.map(function(l) {
+                                        var p = l.path || '';
+                                        return { title: p.replace(/\.[^.]+$/, '') };
+                                    }));
+                            }
+                            return;
+                        }
+                    }
+                    // No full gameflow or no matching levels — fall through
+                    // to auto-generation
+                    hasGameflow = false;
+                    hasStrings = false;
+                }
+            }
+
+            if (hasGameflow) {
+                var gameflow = _trxParseJSON5(gfText);
+
+                // Patch missing fields required by the engine.
+                var gfDirty = false;
+                if (!gameflow.main_menu_picture) {
+                    var tplText = new TextDecoder().decode(
+                        FS.readFile('/games/' + templateMod + '/gameflow.json5'));
+                    var tplGf = _trxParseJSON5(tplText);
+                    gameflow.main_menu_picture = tplGf.main_menu_picture;
+                    gfDirty = true;
+                }
+                var levels = gameflow.levels || [];
+                for (var li = 0; li < levels.length; li++) {
+                    if (levels[li].type === 'title'
+                        || levels[li].type === 'dummy'
+                        || levels[li].type === 'current') continue;
+                    if (!levels[li].lara_outfit) {
+                        levels[li].lara_outfit = 'tr2_classic';
+                        gfDirty = true;
+                    }
+                }
+                if (gfDirty) {
+                    var gfJson = JSON.stringify(gameflow, null, 4);
+                    var gfBytes = new TextEncoder().encode(gfJson);
+                    _trxWriteToVFS(gfEntry.path, gfBytes);
+                    gfEntry.data = gfBytes;
+                }
+
                 if (!hasStrings) {
-                    _trxCopyTemplateStrings(mappedFiles, modDir, templateMod);
+                    var levels = gameflow.levels || [];
+                    _trxGenerateStrings(mappedFiles, modDir, templateMod,
+                        levels.map(function(l) {
+                            var p = l.path || '';
+                            return { title: p.replace(/\.[^.]+$/, '') };
+                        }));
                 }
                 return;
             }
 
-            // --- Auto-generate gameflow from template ---
+            // --- Generate from TOMBPC.DAT (classic TR2 game script) ---
+            if (scriptEntry && templateMod === 'tr2-level') {
+                try {
+                    var scriptInfo = _trxParseTR2Script(scriptEntry.data);
+                    if (scriptInfo && scriptInfo.filenames.length > 1) {
+                        var tplText = new TextDecoder().decode(
+                            FS.readFile('/games/' + templateMod
+                                        + '/gameflow.json5'));
+                        var gameflow = _trxParseJSON5(tplText);
+                        var templateLevel = gameflow.levels[0];
+
+                        // Detect uploaded title file (may differ from
+                        // script name).
+                        var levelPrefix = modPrefix + 'levels/';
+                        var uploadedTitle = null;
+                        for (var i = 0; i < mappedFiles.length; i++) {
+                            if (mappedFiles[i].path
+                                    .indexOf(levelPrefix) === 0) {
+                                var bn = mappedFiles[i].path
+                                    .substring(levelPrefix.length)
+                                    .replace(/\.[^.]+$/, '').toLowerCase();
+                                if (bn === 'title') {
+                                    uploadedTitle = mappedFiles[i].path
+                                        .substring(levelPrefix.length);
+                                }
+                            }
+                        }
+
+                        // Title entry (level 0 in script).
+                        var scriptTitle = scriptInfo.filenames[0]
+                            .replace(/\\/g, '/').split('/').pop()
+                            .toLowerCase();
+                        gameflow.title = {
+                            path: uploadedTitle || scriptTitle,
+                            music_track: scriptInfo.titleSoundId,
+                            sequence: [{ type: 'exit_to_title' }],
+                        };
+
+                        // Playable levels (1..n in script order).
+                        // Keep CD track numbering — music files will
+                        // be renamed to match (see below).
+                        gameflow.levels = [];
+                        var titleEntries = [];
+                        for (var i = 1; i < scriptInfo.filenames.length;
+                             i++) {
+                            var base = scriptInfo.filenames[i]
+                                .replace(/\\/g, '/').split('/').pop()
+                                .toLowerCase();
+                            var entry = JSON.parse(
+                                JSON.stringify(templateLevel));
+                            entry.path = base;
+                            entry.music_track =
+                                scriptInfo.musicTracks[i];
+                            gameflow.levels.push(entry);
+
+                            var title =
+                                (i < scriptInfo.levelTitles.length
+                                 && scriptInfo.levelTitles[i])
+                                    ? scriptInfo.levelTitles[i]
+                                    : base.replace(/\.[^.]+$/, '');
+                            titleEntries.push({ title: title });
+                        }
+
+                        var gfJson = JSON.stringify(gameflow, null, 4);
+                        var gfData = new TextEncoder().encode(gfJson);
+                        var gfPath = modPrefix + 'gameflow.json5';
+                        _trxWriteToVFS(gfPath, gfData);
+                        mappedFiles.push(
+                            { path: gfPath, data: gfData });
+
+                        _trxGenerateStrings(mappedFiles, modDir,
+                            templateMod, titleEntries);
+
+                        // Rename music files to CD track numbering so
+                        // they match trigger values in the level data.
+                        if (scriptInfo.cdOffset !== 0) {
+                            var mPrefix = modPrefix + 'music/';
+                            for (var i = 0; i < mappedFiles.length;
+                                 i++) {
+                                var mp = mappedFiles[i].path;
+                                if (mp.indexOf(mPrefix) !== 0) continue;
+                                var fn = mp.substring(mPrefix.length);
+                                var m = fn.match(/^(\d+)(\..*)/);
+                                if (!m) continue;
+                                var cdName = mPrefix
+                                    + (parseInt(m[1])
+                                       + scriptInfo.cdOffset) + m[2];
+                                FS.writeFile('/' + cdName,
+                                    FS.readFile('/' + mp));
+                                try { FS.unlink('/' + mp); } catch(e) {}
+                                mappedFiles[i].path = cdName;
+                            }
+                        }
+                        return;
+                    }
+                } catch (e) {
+                    console.warn('[TRX] TOMBPC.DAT processing failed, '
+                        + 'falling back to auto-generation:', e);
+                }
+            }
+
+            // --- Auto-generate gameflow from template (fallback) ---
             var tplText = new TextDecoder().decode(
                 FS.readFile('/games/' + templateMod + '/gameflow.json5'));
             var gameflow = _trxParseJSON5(tplText);
@@ -300,14 +729,11 @@
             }
             levelFiles.sort();
 
-            // Use the title level's built-in textures instead of a webp image.
-            delete gameflow.main_menu_picture;
-
             // Add title entry (required by engine).  Use the dedicated title
             // file if present, otherwise fall back to the first playable level.
             gameflow.title = {
                 path: titleFile || levelFiles[0] || 'PLACEHOLDER',
-                music_track: 0,
+                music_track: -1,
                 sequence: [
                     { type: 'exit_to_title' },
                 ],
@@ -328,9 +754,15 @@
             mappedFiles.push({ path: gameflowPath, data: gameflowData });
 
             // Generate strings files with level titles matching the gameflow.
-            var levelTitles = levelFiles.map(function(f) {
-                return { title: f.replace(/\.[^.]+$/, '') };
-            });
+            _trxGenerateStrings(mappedFiles, modDir, templateMod,
+                levelFiles.map(function(f) {
+                    return { title: f.replace(/\.[^.]+$/, '') };
+                }));
+        }
+
+        // Generate strings files from template, replacing levels with the
+        // given titles array so the count matches the actual gameflow.
+        function _trxGenerateStrings(mappedFiles, modDir, templateMod, levelTitles) {
             try {
                 var entries = FS.readdir('/games/' + templateMod);
                 for (var i = 0; i < entries.length; i++) {
@@ -342,25 +774,9 @@
                         strObj.levels = levelTitles;
                         var strJson = JSON.stringify(strObj, null, 4);
                         var strData = new TextEncoder().encode(strJson);
-                        var strPath = modPrefix + entries[i];
+                        var strPath = 'games/' + modDir + '/' + entries[i];
                         FS.writeFile('/' + strPath, strData);
                         mappedFiles.push({ path: strPath, data: strData });
-                    }
-                }
-            } catch(e) {}
-        }
-
-        // Copy template strings files into the mod directory.
-        function _trxCopyTemplateStrings(mappedFiles, modDir, templateMod) {
-            try {
-                var entries = FS.readdir('/games/' + templateMod);
-                for (var i = 0; i < entries.length; i++) {
-                    if (entries[i].indexOf('strings') === 0
-                        && entries[i].endsWith('.json5')) {
-                        var data = FS.readFile('/games/' + templateMod + '/' + entries[i]);
-                        var strPath = 'games/' + modDir + '/' + entries[i];
-                        FS.writeFile('/' + strPath, data);
-                        mappedFiles.push({ path: strPath, data: new Uint8Array(data) });
                     }
                 }
             } catch(e) {}
@@ -658,13 +1074,25 @@
                 progressDiv.classList.remove('hidden');
                 status.textContent = 'Resetting...';
 
-                _trxProfileManager.resetDefaults(_trxDefaultManifest, function (done, total, name) {
-                    var pct = total > 0 ? Math.round((done / total) * 100) : 0;
-                    progressFill.style.width = pct + '%';
-                    if (name) {
-                        status.textContent = 'Clearing ' + name + '...';
-                    }
-                }).then(function () {
+                // Clear SW caches so stale .js/.wasm are not served,
+                // but only when online (offline reload needs the cache).
+                var swCleanup = navigator.onLine
+                    ? caches.keys().then(function(names) {
+                        return Promise.all(names.map(function(n) {
+                            return caches.delete(n);
+                        }));
+                    })
+                    : Promise.resolve();
+                Promise.all([
+                    swCleanup,
+                    _trxProfileManager.resetDefaults(_trxDefaultManifest, function (done, total, name) {
+                        var pct = total > 0 ? Math.round((done / total) * 100) : 0;
+                        progressFill.style.width = pct + '%';
+                        if (name) {
+                            status.textContent = 'Clearing ' + name + '...';
+                        }
+                    })
+                ]).then(function () {
                     progressFill.style.width = '100%';
                     status.textContent = 'Done! Reloading...';
                     setTimeout(function () { window.location.reload(); }, 500);

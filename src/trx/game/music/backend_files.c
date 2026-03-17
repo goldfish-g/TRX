@@ -58,7 +58,7 @@ static int32_t M_Play(
 
     char *file_path = M_GetTrackFileName(data->dir, track_id);
     if (file_path == nullptr) {
-        LOG_ERROR("Invalid track: %d", track_id);
+        LOG_WARNING("Music track %d not found in %s", track_id, data->dir);
         return -1;
     }
 
