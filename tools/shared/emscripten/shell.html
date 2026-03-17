@@ -242,6 +242,141 @@
             }
         };
 
+        // Minimal JSON5 → JSON parser (handles // comments + trailing commas)
+        function _trxParseJSON5(text) {
+            text = text.replace(/\/\/.*$/gm, '');
+            text = text.replace(/,\s*([\]}])/g, '$1');
+            return JSON.parse(text);
+        }
+
+        // Set up the gameflow + strings for a custom level profile.
+        // If the upload already contains a gameflow.json5 (TRX-native custom
+        // level), it is used as-is.  Otherwise one is generated from the
+        // template.  `mappedFiles` is mutated: new entries may be appended.
+        function _trxSetupCustomGameflow(mappedFiles, modDir, templateMod) {
+            var modPrefix = 'games/' + modDir + '/';
+
+            // Check if the upload already included a gameflow.json5.
+            var hasGameflow = false;
+            var hasStrings = false;
+            for (var i = 0; i < mappedFiles.length; i++) {
+                if (mappedFiles[i].path === modPrefix + 'gameflow.json5') {
+                    hasGameflow = true;
+                }
+                if (mappedFiles[i].path.indexOf(modPrefix + 'strings') === 0
+                    && mappedFiles[i].path.endsWith('.json5')) {
+                    hasStrings = true;
+                }
+            }
+
+            if (hasGameflow) {
+                // TRX-native level — copy missing strings from template only
+                if (!hasStrings) {
+                    _trxCopyTemplateStrings(mappedFiles, modDir, templateMod);
+                }
+                return;
+            }
+
+            // --- Auto-generate gameflow from template ---
+            var tplText = new TextDecoder().decode(
+                FS.readFile('/games/' + templateMod + '/gameflow.json5'));
+            var gameflow = _trxParseJSON5(tplText);
+            var templateLevel = gameflow.levels[0];
+
+            // Find level files, separating title screen from playable levels.
+            var levelPrefix = modPrefix + 'levels/';
+            var levelFiles = [];
+            var titleFile = null;
+            for (var i = 0; i < mappedFiles.length; i++) {
+                if (mappedFiles[i].path.indexOf(levelPrefix) === 0) {
+                    var filename = mappedFiles[i].path.substring(levelPrefix.length);
+                    var baseName = filename.replace(/\.[^.]+$/, '').toLowerCase();
+                    if (baseName === 'title') {
+                        titleFile = filename;
+                    } else {
+                        levelFiles.push(filename);
+                    }
+                }
+            }
+            levelFiles.sort();
+
+            // Use the title level's built-in textures instead of a webp image.
+            delete gameflow.main_menu_picture;
+
+            // Add title entry (required by engine).  Use the dedicated title
+            // file if present, otherwise fall back to the first playable level.
+            gameflow.title = {
+                path: titleFile || levelFiles[0] || 'PLACEHOLDER',
+                music_track: 0,
+                sequence: [
+                    { type: 'exit_to_title' },
+                ],
+            };
+
+            // Generate one level entry per file (cloned from template)
+            gameflow.levels = levelFiles.map(function(filename) {
+                var entry = JSON.parse(JSON.stringify(templateLevel));
+                entry.path = filename;
+                return entry;
+            });
+
+            // Write generated gameflow
+            var gameflowJson = JSON.stringify(gameflow, null, 4);
+            var gameflowData = new TextEncoder().encode(gameflowJson);
+            var gameflowPath = modPrefix + 'gameflow.json5';
+            _trxWriteToVFS(gameflowPath, gameflowData);
+            mappedFiles.push({ path: gameflowPath, data: gameflowData });
+
+            // Generate strings files with level titles matching the gameflow.
+            var levelTitles = levelFiles.map(function(f) {
+                return { title: f.replace(/\.[^.]+$/, '') };
+            });
+            try {
+                var entries = FS.readdir('/games/' + templateMod);
+                for (var i = 0; i < entries.length; i++) {
+                    if (entries[i].indexOf('strings') === 0
+                        && entries[i].endsWith('.json5')) {
+                        var tplStrText = new TextDecoder().decode(
+                            FS.readFile('/games/' + templateMod + '/' + entries[i]));
+                        var strObj = _trxParseJSON5(tplStrText);
+                        strObj.levels = levelTitles;
+                        var strJson = JSON.stringify(strObj, null, 4);
+                        var strData = new TextEncoder().encode(strJson);
+                        var strPath = modPrefix + entries[i];
+                        FS.writeFile('/' + strPath, strData);
+                        mappedFiles.push({ path: strPath, data: strData });
+                    }
+                }
+            } catch(e) {}
+        }
+
+        // Copy template strings files into the mod directory.
+        function _trxCopyTemplateStrings(mappedFiles, modDir, templateMod) {
+            try {
+                var entries = FS.readdir('/games/' + templateMod);
+                for (var i = 0; i < entries.length; i++) {
+                    if (entries[i].indexOf('strings') === 0
+                        && entries[i].endsWith('.json5')) {
+                        var data = FS.readFile('/games/' + templateMod + '/' + entries[i]);
+                        var strPath = 'games/' + modDir + '/' + entries[i];
+                        FS.writeFile('/' + strPath, data);
+                        mappedFiles.push({ path: strPath, data: new Uint8Array(data) });
+                    }
+                }
+            } catch(e) {}
+        }
+
+        // Write data to VFS, creating parent directories as needed.
+        function _trxWriteToVFS(path, data) {
+            var parts = path.split('/');
+            var dir = '';
+            for (var i = 0; i < parts.length - 1; i++) {
+                dir += (dir ? '/' : '') + parts[i];
+                try { FS.mkdir('/' + dir); } catch(e) {}
+            }
+            FS.writeFile('/' + path, data);
+        }
+
         function _trxStartGame(profile) {
             _trxCurrentProfile = profile;
             _trxEngineStarting = true;
@@ -286,7 +421,8 @@
                     Module.syncViewportLayout();
                 }
                 if (pm) pm.updateLastPlayed(profile.id).catch(function () {});
-                Module.callMain(['--engine', String(engine), '--mod', profile.mod]);
+                var effectiveMod = profile.modDir || profile.mod;
+                Module.callMain(['--engine', String(engine), '--mod', effectiveMod]);
             }).catch(function (err) {
                 console.error('[TRX] Failed to load game data:', err);
                 document.getElementById('status').textContent = 'Error: ' + (err.message || 'Failed to load game data');
@@ -324,15 +460,17 @@
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('canvas').style.display = '';
                 if (pm) pm.updateLastPlayed(profile.id).catch(function () {});
+                var effectiveMod = profile.modDir || profile.mod;
                 if (Module._profileCallback) {
-                    Module._profileCallback(profile.mod, engine);
+                    Module._profileCallback(effectiveMod, engine);
                 }
             }).catch(function (err) {
                 console.error('[TRX] Failed to load profile data:', err);
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('canvas').style.display = '';
+                var effectiveMod = profile.modDir || profile.mod;
                 if (Module._profileCallback) {
-                    Module._profileCallback(profile.mod, engine);
+                    Module._profileCallback(effectiveMod, engine);
                 }
             });
         }
@@ -668,7 +806,7 @@
             progressDiv.classList.add('hidden');
             errorEl.classList.add('hidden');
 
-            var gdm = new GameDataManager(profile.mod);
+            var gdm = new GameDataManager(profile.modDir || profile.mod);
 
             function showError(msg) {
                 errorEl.textContent = msg;
@@ -748,18 +886,22 @@
                     progressFill.style.width = Math.round(frac * 100) + '%';
                     progressText.textContent = msg;
                 }, showWarning, showLanguageSelect).then(function(mappedFiles) {
-                    progressText.textContent = 'Saving to browser storage...';
+                    // Load into FS first (template gameflow must be readable)
+                    progressText.textContent = 'Loading into game...';
                     progressFill.style.width = '80%';
+                    gdm.loadMappedToFS(mappedFiles);
 
-                    // Store in IDB via ProfileManager
+                    // Generate gameflow + strings for custom level profiles
+                    if (profile.modDir) {
+                        _trxSetupCustomGameflow(mappedFiles, profile.modDir, profile.mod);
+                    }
+
+                    // Store to IDB (mappedFiles now includes gameflow + strings)
+                    progressText.textContent = 'Saving to browser storage...';
                     return _trxProfileManager.storeGameData(profile.id, mappedFiles, function (stored, total) {
-                        var pct = 80 + Math.round((stored / total) * 15);
+                        var pct = 85 + Math.round((stored / total) * 10);
                         progressFill.style.width = pct + '%';
                     }).then(function () {
-                        // Load into FS
-                        progressText.textContent = 'Loading into game...';
-                        progressFill.style.width = '95%';
-                        gdm.loadMappedToFS(mappedFiles);
                         progressText.textContent = 'Done!';
                         progressFill.style.width = '100%';
 

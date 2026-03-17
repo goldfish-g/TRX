@@ -161,6 +161,12 @@ var ProfileManager = (function () {
             lastPlayed: null,
         };
 
+        // Custom level profiles get a unique mod directory based on their ID
+        // so that each profile's game data is isolated.
+        if (opts.mod.endsWith('-level')) {
+            profile.modDir = profile.id;
+        }
+
         return self._openDB().then(function (db) {
             return new Promise(function (resolve, reject) {
                 var tx = db.transaction('profiles', 'readwrite');
