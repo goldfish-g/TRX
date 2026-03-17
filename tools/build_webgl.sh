@@ -363,7 +363,7 @@ cp "$SHARED_EMC/vendor/fflate.min.js" "$BUILD_DIR/vendor/fflate.min.js"
 
 # Add cache-busting query strings to the built HTML so that browsers
 # and reverse proxies (nginx, CDNs) never serve stale .js/.wasm/.data.
-CACHE_BUST="v=$(md5sum "$BUILD_DIR/TRX.wasm" | cut -c1-8)"
+CACHE_BUST="v=$(cat "$BUILD_DIR/TRX.wasm" "$BUILD_DIR/TRX.js" | md5sum | cut -c1-8)"
 echo ""
 echo ">>> Cache-busting: $CACHE_BUST"
 sed -i "s|src=\"TRX.js\"|src=\"TRX.js?${CACHE_BUST}\"|" "$BUILD_DIR/TRX.html"
