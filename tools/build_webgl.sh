@@ -177,14 +177,17 @@ stage_expansion() {
 echo ">>> Staging TR1 ship data..."
 stage_base_game tr1 tr1
 stage_expansion tr1 tr1-ub
+stage_expansion tr1 tr1-level
 
 echo ">>> Staging TR2 ship data..."
 stage_base_game tr2 tr2
 stage_expansion tr2 tr2-gm
+stage_expansion tr2 tr2-level
 
 echo ">>> Staging TR3 ship data..."
 stage_base_game tr3 tr3
 stage_expansion tr3 tr3-la
+stage_expansion tr3 tr3-level
 
 # --- Copy TRX images into ship data ---
 # TRX images (title screens, legal notices, credits) live in the game
