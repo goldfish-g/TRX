@@ -385,6 +385,12 @@ var GameDataManager = (function () {
             return prefix + 'audio/' + lowerBase;
         }
 
+        // --- Config files (.json5) — gameflow, strings ---
+        // Only map root-level json5 files (not inside subdirectories).
+        if (ext === '.json5' && lowerPath.indexOf('/') === -1) {
+            return prefix + lowerBase;
+        }
+
         return null;  // skip unknown files
     }
 
