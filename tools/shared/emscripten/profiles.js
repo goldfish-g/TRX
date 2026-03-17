@@ -316,7 +316,7 @@ var ProfileManager = (function () {
     ProfileManager.prototype.dumpPreloadedToIDB = function (id, mod, onProgress) {
         var self = this;
         var GAME_EXTS = ['.phd', '.tr2', '.psx', '.tub', '.sfx',
-                         '.flac', '.ogg', '.mp3', '.wav',
+                         '.flac', '.ogg', '.mp3', '.wav', '.wma',
                          '.mp4', '.rpl', '.ogv', '.avi', '.fmv',
                          '.wad'];
         var files = [];
