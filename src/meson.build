@@ -833,7 +833,7 @@ if host_machine.system() == 'windows'
 elif is_emscripten
   link_args += [
     '-pthread',
-    '-sPTHREAD_POOL_SIZE=4',
+    '-sPTHREAD_POOL_SIZE=6',
     '-sUSE_SDL=2',
     '-sUSE_ZLIB=1',
     '-sFULL_ES3=1',
