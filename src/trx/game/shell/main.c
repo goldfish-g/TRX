@@ -54,6 +54,10 @@ int main(int argc, char *argv[])
 
         const char *const pending_mod = Shell_GetPendingMod();
         if (pending_mod != nullptr) {
+            // Clear stale directory cache so the path resolver can find
+            // game data that was loaded into the VFS after the previous
+            // Shell_Main built its caches (e.g. custom level profiles).
+            TRXPath_Init(nullptr);
             const SHELL_MOD *const mod = Shell_GetModByName(pending_mod);
             Shell_ClearPendingMod();
             if (mod != nullptr && mod->is_available) {
