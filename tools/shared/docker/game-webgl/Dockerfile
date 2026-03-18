@@ -43,10 +43,10 @@ RUN cd /tmp/FFmpeg \
         --ranlib=emranlib \
         --enable-static \
         --disable-shared \
-        --disable-pthreads \
+        --enable-pthreads \
         --disable-runtime-cpudetect \
         --disable-stripping \
-        --extra-cflags="-pthread -sUSE_ZLIB=1" \
+        --extra-cflags="-pthread -sUSE_ZLIB=1 -msimd128 -O2" \
         --extra-ldflags="-pthread" \
         $(cat /tmp/ffmpeg_flags_webgl.txt) \
     && emmake make -j$(nproc) \
