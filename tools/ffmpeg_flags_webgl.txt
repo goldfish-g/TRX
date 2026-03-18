@@ -37,8 +37,7 @@
 --enable-zlib
 --enable-small
 --disable-debug
---disable-ffplay
---disable-ffprobe
+--disable-programs
 --disable-doc
 --disable-network
 --disable-htmlpages
