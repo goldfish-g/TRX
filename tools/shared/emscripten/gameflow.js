@@ -20,8 +20,17 @@
 // level), it is used as-is.  Otherwise one is generated from the
 // template or TOMBPC.DAT.  `mappedFiles` is mutated: new entries may
 // be appended.
-function _trxSetupCustomGameflow(mappedFiles, modDir, templateMod) {
+function _trxSetupCustomGameflow(mappedFiles, modDir, templateMod, useOutfitImport) {
     var modPrefix = 'games/' + modDir + '/';
+    var defaultOutfit = useOutfitImport
+        ? 'level_default'
+        : templateMod.replace('-level', '_classic');
+
+    // Inject 'level_default' outfit so custom levels can display the
+    // Lara meshes baked into the level file (backwards compatibility).
+    if (useOutfitImport) {
+        _trxInjectLevelDefaultOutfit(modDir, templateMod);
+    }
 
     // Check if the upload already included a gameflow.json5 or
     // a classic game script (TOMBPC.DAT).
@@ -91,7 +100,7 @@ function _trxSetupCustomGameflow(mappedFiles, modDir, templateMod) {
                     var lvl = {
                         path: lvlPath,
                         music_track: src.music_track != null ? src.music_track : -1,
-                        lara_outfit: src.lara_outfit || 'tr2_classic',
+                        lara_outfit: src.lara_outfit || defaultOutfit,
                         sequence: src.sequence || [],
                     };
                     // Clean injection paths (strip directory prefixes)
@@ -272,6 +281,7 @@ function _trxSetupCustomGameflow(mappedFiles, modDir, templateMod) {
                     var entry = JSON.parse(
                         JSON.stringify(templateLevel));
                     entry.path = base;
+                    entry.lara_outfit = defaultOutfit;
                     entry.music_track =
                         scriptInfo.musicTracks[i];
                     // Use translated sequence if available,
@@ -364,6 +374,7 @@ function _trxSetupCustomGameflow(mappedFiles, modDir, templateMod) {
     gameflow.levels = levelFiles.map(function(filename) {
         var entry = JSON.parse(JSON.stringify(templateLevel));
         entry.path = filename;
+        entry.lara_outfit = defaultOutfit;
         return entry;
     });
 
@@ -384,6 +395,76 @@ function _trxSetupCustomGameflow(mappedFiles, modDir, templateMod) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// Inject a 'level_default' outfit into outfits.json5 on the VFS so
+// that custom levels can use the Lara meshes baked into the level
+// file.  Also injects the display string into base_strings files.
+// The modified files are written to the mod directory so they take
+// priority over the common config without altering the originals.
+function _trxInjectLevelDefaultOutfit(modDir, templateMod) {
+    // Engine-specific braid and gun_map settings.
+    var isTR1 = templateMod === 'tr1-level';
+    var braid;
+    if (isTR1) {
+        braid = {
+            mode: 'BRAID_MODE_TR1_FULL',
+            mesh_offset: 10,
+            gold_offset: 16,
+            hair_pos: { x: 0, y: 20, z: -45 },
+        };
+    } else {
+        braid = {
+            mesh_offset: 22,
+            gold_offset: 28,
+            hair_pos: { x: 0, y: -23, z: -55 },
+        };
+    }
+    var gunMap = isTR1 ? 0 : (templateMod === 'tr3-level' ? 3 : 2);
+
+    try {
+        var outfitsText = new TextDecoder().decode(
+            FS.readFile('/cfg/outfits.json5'));
+        var outfits = _trxParseJSON5(outfitsText);
+        if (outfits.outfits && !outfits.outfits.level_default) {
+            outfits.outfits.level_default = {
+                name_gs: 'dynamic/enums/lara_outfit/level_default',
+                mesh_object: 'O_LARA',
+                gun_map: gunMap,
+                combat_face_offset: -1,
+                supports_sunglasses: false,
+                braid: braid,
+            };
+            _trxWriteToVFS('games/' + modDir + '/outfits.json5',
+                new TextEncoder().encode(
+                    JSON.stringify(outfits, null, 4)));
+        }
+    } catch (e) {
+        console.warn('[TRX] Failed to inject level_default outfit:', e);
+    }
+
+    try {
+        var cfgEntries = FS.readdir('/cfg');
+        for (var i = 0; i < cfgEntries.length; i++) {
+            if (cfgEntries[i].indexOf('base_strings') !== 0
+                || !cfgEntries[i].endsWith('.json5')) continue;
+            var strText = new TextDecoder().decode(
+                FS.readFile('/cfg/' + cfgEntries[i]));
+            var strObj = _trxParseJSON5(strText);
+            if (strObj.dynamic && strObj.dynamic.enums
+                && strObj.dynamic.enums.lara_outfit
+                && !strObj.dynamic.enums.lara_outfit.level_default) {
+                strObj.dynamic.enums.lara_outfit.level_default
+                    = 'Level Default';
+                _trxWriteToVFS(
+                    'games/' + modDir + '/' + cfgEntries[i],
+                    new TextEncoder().encode(
+                        JSON.stringify(strObj, null, 4)));
+            }
+        }
+    } catch (e) {
+        console.warn('[TRX] Failed to inject level_default string:', e);
+    }
+}
 
 // Generate strings files from template, replacing levels with the
 // given titles array so the count matches the actual gameflow.
