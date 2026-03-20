@@ -80,10 +80,14 @@ function _trxShowUploadUI(profile, callback, refresh) {
 
     var conversionDiv = document.getElementById('upload-conversion-warning');
     var outfitCheckbox = document.getElementById('upload-outfit-checkbox');
+    var selectSection = document.getElementById('upload-select-section');
 
     function showConversionWarning() {
         return new Promise(function(resolve, reject) {
             progressDiv.classList.add('hidden');
+            selectSection.classList.add('hidden');
+            var uploadBack = document.getElementById('btn-upload-back');
+            if (uploadBack) uploadBack.classList.add('hidden');
             outfitCheckbox.checked = false;
             conversionDiv.classList.remove('hidden');
 
@@ -94,6 +98,8 @@ function _trxShowUploadUI(profile, callback, refresh) {
                 btnContinue.removeEventListener('click', onContinue);
                 btnCancel.removeEventListener('click', onCancel);
                 conversionDiv.classList.add('hidden');
+                selectSection.classList.remove('hidden');
+                if (uploadBack) uploadBack.classList.remove('hidden');
             }
             function onContinue() {
                 var useOutfit = outfitCheckbox.checked;
