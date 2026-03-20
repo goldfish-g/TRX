@@ -97,18 +97,20 @@
         <div class="upload-inner">
             <h1>TRX</h1>
             <p class="subtitle" id="upload-subtitle">Tomb Raider Engine &mdash; WebGL Build</p>
-            <div id="upload-dropzone">
-                <p>Drag &amp; drop game files here</p>
-                <p class="upload-hint">Accepts: folder, .zip, or .tar.gz</p>
+            <div id="upload-select-section">
+                <div id="upload-dropzone">
+                    <p>Drag &amp; drop game files here</p>
+                    <p class="upload-hint">Accepts: folder, .zip, or .tar.gz</p>
+                </div>
+                <div class="upload-buttons">
+                    <button id="btn-select-folder" type="button">Select Folder</button>
+                    <button id="btn-select-archive" type="button">Select Archive</button>
+                </div>
+                <p class="upload-note">
+                    Provide your Tomb Raider game files (original or remastered) from GOG or Steam.<br>
+                    Files are stored locally in your browser and never uploaded to any server.
+                </p>
             </div>
-            <div class="upload-buttons">
-                <button id="btn-select-folder" type="button">Select Folder</button>
-                <button id="btn-select-archive" type="button">Select Archive</button>
-            </div>
-            <p class="upload-note">
-                Provide your Tomb Raider game files (original or remastered) from GOG or Steam.<br>
-                Files are stored locally in your browser and never uploaded to any server.
-            </p>
             <div id="upload-progress" class="hidden">
                 <div class="progress-bar"><div class="progress-fill" id="upload-progress-fill"></div></div>
                 <p class="progress-text" id="upload-progress-text"></p>
@@ -124,13 +126,20 @@
             <div id="upload-conversion-warning" class="hidden">
                 <p>This level uses a classic format that will be automatically
                 converted for the TRX engine.</p>
-                <label class="upload-checkbox-label">
-                    <input type="checkbox" id="upload-outfit-checkbox">
-                    <span>Import outfit from level file</span>
-                </label>
-                <p class="upload-checkbox-hint">Uses the Lara model embedded in
-                the level file. The braid and holsters may not display correctly
-                on some custom models.</p>
+                <p class="upload-checkbox-hint">This almost always works fine, but
+                may sometimes introduce issues such as wrong level
+                order, incorrect item names, missing music triggers, or
+                other differences from the original game.</p>
+                <div class="upload-checkbox-card">
+                    <label class="upload-checkbox-label">
+                        <input type="checkbox" id="upload-outfit-checkbox">
+                        <span>Import outfit from level file</span>
+                    </label>
+                    <p class="upload-checkbox-hint">Uses the Lara model embedded in
+                    the level file instead of the default TRX outfit. This is usually fine, but depending
+                    on the level, it may cause some issues with the braid,
+                    incorrect holsters, or other visual artifacts.</p>
+                </div>
                 <div class="upload-buttons">
                     <button id="btn-conversion-continue" type="button">Continue</button>
                     <button id="btn-conversion-cancel" type="button">Cancel</button>
