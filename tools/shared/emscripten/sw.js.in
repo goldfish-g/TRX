@@ -8,8 +8,6 @@ var PRECACHE_URLS = [
     'TRX.js',
     'TRX.wasm',
     'shell.css',
-    'tombpc.js',
-    'gameflow.js',
     'gamedata.js',
     'profiles.js',
     'ui.js',

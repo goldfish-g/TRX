@@ -2,12 +2,14 @@
 //
 // Handles drag-and-drop / file-picker uploads, archive extraction,
 // language selection, FMV warnings, and progress display.  After
-// processing, writes files to the VFS, generates gameflow for custom
-// levels, persists to IndexedDB, and launches the game.
+// processing, writes files to the VFS, persists to IndexedDB, and
+// launches the game.
+//
+// Custom level profiles must include a pre-generated gameflow.json5
+// (produced by the TRX Level Converter service).
 //
 // Depends on: Emscripten FS             (global `FS`)
 //             GameDataManager           (from gamedata.js)
-//             _trxSetupCustomGameflow   (from gameflow.js)
 //             _trxProfileManager        (global from shell.html)
 //             _trxStartGame, _trxResumeWithProfile,
 //             _trxShowProfileSelector   (from ui.js)
@@ -78,45 +80,6 @@ function _trxShowUploadUI(profile, callback, refresh) {
         });
     }
 
-    var conversionDiv = document.getElementById('upload-conversion-warning');
-    var outfitCheckbox = document.getElementById('upload-outfit-checkbox');
-    var selectSection = document.getElementById('upload-select-section');
-
-    function showConversionWarning() {
-        return new Promise(function(resolve, reject) {
-            progressDiv.classList.add('hidden');
-            selectSection.classList.add('hidden');
-            var uploadBack = document.getElementById('btn-upload-back');
-            if (uploadBack) uploadBack.classList.add('hidden');
-            outfitCheckbox.checked = false;
-            conversionDiv.classList.remove('hidden');
-
-            var btnContinue = document.getElementById('btn-conversion-continue');
-            var btnCancel = document.getElementById('btn-conversion-cancel');
-
-            function cleanup() {
-                btnContinue.removeEventListener('click', onContinue);
-                btnCancel.removeEventListener('click', onCancel);
-                conversionDiv.classList.add('hidden');
-                selectSection.classList.remove('hidden');
-                if (uploadBack) uploadBack.classList.remove('hidden');
-            }
-            function onContinue() {
-                var useOutfit = outfitCheckbox.checked;
-                cleanup();
-                progressDiv.classList.remove('hidden');
-                resolve(useOutfit);
-            }
-            function onCancel() {
-                cleanup();
-                reject(new Error('Upload cancelled.'));
-            }
-
-            btnContinue.addEventListener('click', onContinue);
-            btnCancel.addEventListener('click', onCancel);
-        });
-    }
-
     var langSelectDiv = document.getElementById('upload-lang-select');
     var langList = document.getElementById('upload-lang-list');
 
@@ -145,7 +108,6 @@ function _trxShowUploadUI(profile, callback, refresh) {
         if (!files || files.length === 0) return;
         hideError();
         warningDiv.classList.add('hidden');
-        conversionDiv.classList.add('hidden');
         langSelectDiv.classList.add('hidden');
         progressDiv.classList.remove('hidden');
         progressFill.style.width = '0%';
@@ -158,53 +120,46 @@ function _trxShowUploadUI(profile, callback, refresh) {
             progressFill.style.width = Math.round(frac * 100) + '%';
             progressText.textContent = msg;
         }, fmvWarning, showLanguageSelect).then(function(mappedFiles) {
-            // Load into FS first (template gameflow must be readable)
             progressText.textContent = 'Loading into game...';
             progressFill.style.width = '80%';
             gdm.loadMappedToFS(mappedFiles);
 
-            // For custom level profiles without a TRX-native gameflow,
-            // show a conversion warning with outfit preference.
-            var conversionStep = Promise.resolve(false);
+            // Custom level profiles must include a pre-generated
+            // gameflow.json5 (from the TRX Level Converter service).
             if (profile.modDir) {
                 var modPrefix = 'games/' + profile.modDir + '/';
-                var hasNativeGameflow = false;
+                var hasGameflow = false;
                 for (var i = 0; i < mappedFiles.length; i++) {
                     if (mappedFiles[i].path === modPrefix + 'gameflow.json5') {
-                        hasNativeGameflow = true;
+                        hasGameflow = true;
                         break;
                     }
                 }
-                if (!hasNativeGameflow) {
-                    conversionStep = showConversionWarning();
+                if (!hasGameflow) {
+                    throw new Error(
+                        'This upload does not contain a valid TRX gameflow. '
+                        + 'Please convert your game files first using the '
+                        + 'TRX Level Converter before uploading.'
+                    );
                 }
             }
 
-            return conversionStep.then(function(useOutfitImport) {
-                // Generate gameflow + strings for custom level profiles
-                if (profile.modDir) {
-                    _trxSetupCustomGameflow(
-                        mappedFiles, profile.modDir,
-                        profile.mod, useOutfitImport);
+            // Store to IDB
+            progressText.textContent = 'Saving to browser storage...';
+            return _trxProfileManager.storeGameData(profile.id, mappedFiles, function (stored, total) {
+                var pct = 85 + Math.round((stored / total) * 10);
+                progressFill.style.width = pct + '%';
+            }).then(function () {
+                progressText.textContent = 'Done!';
+                progressFill.style.width = '100%';
+
+                // Start the game
+                screen.classList.add('hidden');
+                if (callback) {
+                    _trxResumeWithProfile(profile);
+                } else {
+                    _trxStartGame(profile);
                 }
-
-                // Store to IDB (mappedFiles now includes gameflow + strings)
-                progressText.textContent = 'Saving to browser storage...';
-                return _trxProfileManager.storeGameData(profile.id, mappedFiles, function (stored, total) {
-                    var pct = 85 + Math.round((stored / total) * 10);
-                    progressFill.style.width = pct + '%';
-                }).then(function () {
-                    progressText.textContent = 'Done!';
-                    progressFill.style.width = '100%';
-
-                    // Start the game
-                    screen.classList.add('hidden');
-                    if (callback) {
-                        _trxResumeWithProfile(profile);
-                    } else {
-                        _trxStartGame(profile);
-                    }
-                });
             });
         }).catch(function(err) {
             progressDiv.classList.add('hidden');
