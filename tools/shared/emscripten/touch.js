@@ -128,51 +128,138 @@
     dpad.addEventListener('touchend', maybeEndDpadTouch, { passive: false });
     dpad.addEventListener('touchcancel', maybeEndDpadTouch, { passive: false });
 
+    // ------------------------------------------------------------------
+    // Action-button touch handling with area-based multi-press.
+    // Each touch tracks ALL buttons overlapping the finger's contact
+    // area (via Touch.radiusX/radiusY), so a single finger can hold
+    // two adjacent buttons simultaneously.  Sliding is also supported:
+    // moving the finger updates the covered set in real time.
+    // ------------------------------------------------------------------
+
+    var touchBtnMap = {};  // touchId -> [btn, btn, …]
+
+    // Return every visible action button whose bounding circle overlaps
+    // the touch contact area.
+    function findBtnsForTouch(touch) {
+        var cx = touch.clientX;
+        var cy = touch.clientY;
+        // Use the browser-reported contact radius when available, but
+        // fall back to a fingertip-sized minimum (~17 CSS px) so that
+        // adjacent orbit buttons can always be co-pressed.
+        var touchR = Math.max(touch.radiusX || 0, touch.radiusY || 0, 17);
+        var result = [];
+        for (var i = 0; i < buttons.length; i++) {
+            var btn = buttons[i];
+            if (btn.closest('.tc-dpad')) {
+                continue;
+            }
+            var rect = btn.getBoundingClientRect();
+            if (rect.width === 0) {
+                continue; // hidden (display: none)
+            }
+            var btnCx = rect.left + rect.width * 0.5;
+            var btnCy = rect.top + rect.height * 0.5;
+            var btnR = Math.min(rect.width, rect.height) * 0.5;
+            var dx = cx - btnCx;
+            var dy = cy - btnCy;
+            if (dx * dx + dy * dy < (touchR + btnR) * (touchR + btnR)) {
+                result.push(btn);
+            }
+        }
+        return result;
+    }
+
+    function syncBtnState(btn) {
+        var pressed = false;
+        for (var id in touchBtnMap) {
+            var btns = touchBtnMap[id];
+            for (var j = 0; j < btns.length; j++) {
+                if (btns[j] === btn) {
+                    pressed = true;
+                    break;
+                }
+            }
+            if (pressed) {
+                break;
+            }
+        }
+        btn.classList.toggle('active', pressed);
+        setRole(btn.getAttribute('data-role'), pressed);
+    }
+
+    function syncBtnList(list) {
+        for (var i = 0; i < list.length; i++) {
+            syncBtnState(list[i]);
+        }
+    }
+
+    // Collect the union of two button arrays (no duplicates).
+    function btnUnion(a, b) {
+        var result = a.slice();
+        for (var i = 0; i < b.length; i++) {
+            if (result.indexOf(b[i]) < 0) {
+                result.push(b[i]);
+            }
+        }
+        return result;
+    }
+
     buttons.forEach(function(btn) {
         if (btn.closest('.tc-dpad')) {
             return;
         }
-        var role = btn.getAttribute('data-role');
-        var activeTouches = {};  // touchId -> true
-
         btn.addEventListener('touchstart', function(e) {
             e.preventDefault();
-            var dominated = Object.keys(activeTouches).length === 0;
             for (var i = 0; i < e.changedTouches.length; i++) {
-                activeTouches[e.changedTouches[i].identifier] = true;
-            }
-            if (dominated) {
-                btn.classList.add('active');
-                setRole(role, true);
+                var t = e.changedTouches[i];
+                var covered = findBtnsForTouch(t);
+                if (covered.indexOf(btn) < 0) {
+                    covered.push(btn);
+                }
+                touchBtnMap[t.identifier] = covered;
+                syncBtnList(covered);
             }
             canvas.focus();
         }, { passive: false });
-
-        btn.addEventListener('touchend', function(e) {
-            e.preventDefault();
-            for (var i = 0; i < e.changedTouches.length; i++) {
-                delete activeTouches[e.changedTouches[i].identifier];
-            }
-            if (Object.keys(activeTouches).length === 0) {
-                btn.classList.remove('active');
-                setRole(role, false);
-            }
-        }, { passive: false });
-
-        btn.addEventListener('touchcancel', function(e) {
-            e.preventDefault();
-            for (var i = 0; i < e.changedTouches.length; i++) {
-                delete activeTouches[e.changedTouches[i].identifier];
-            }
-            if (Object.keys(activeTouches).length === 0) {
-                btn.classList.remove('active');
-                setRole(role, false);
-            }
-        }, { passive: false });
     });
 
-    // Expose visibility control for C (via EM_JS)
+    document.addEventListener('touchmove', function(e) {
+        for (var i = 0; i < e.changedTouches.length; i++) {
+            var t = e.changedTouches[i];
+            var oldBtns = touchBtnMap[t.identifier];
+            if (!oldBtns) {
+                continue;
+            }
+            var newBtns = findBtnsForTouch(t);
+            touchBtnMap[t.identifier] = newBtns;
+            syncBtnList(btnUnion(oldBtns, newBtns));
+        }
+    }, { passive: true });
+
+    function onBtnTouchEnd(e) {
+        for (var i = 0; i < e.changedTouches.length; i++) {
+            var t = e.changedTouches[i];
+            var btns = touchBtnMap[t.identifier];
+            if (!btns) {
+                continue;
+            }
+            delete touchBtnMap[t.identifier];
+            syncBtnList(btns);
+        }
+    }
+
+    document.addEventListener('touchend', onBtnTouchEnd);
+    document.addEventListener('touchcancel', onBtnTouchEnd);
+
+    // Expose visibility control for C (via EM_JS).
+    // Also toggles the engine-3 class so TR3-only buttons appear.
     Module.setTouchControlsVisible = function(show) {
         overlay.style.display = show ? 'block' : 'none';
+        if (show && typeof _trxCurrentProfile !== 'undefined' && _trxCurrentProfile) {
+            var modDef = typeof MOD_DEFINITIONS !== 'undefined'
+                ? MOD_DEFINITIONS[_trxCurrentProfile.mod] : null;
+            var engine = modDef ? modDef.engine : _trxCurrentProfile.engine;
+            overlay.classList.toggle('engine-3', engine === 3);
+        }
     };
 })();
