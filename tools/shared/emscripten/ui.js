@@ -119,6 +119,9 @@ function _trxResumeWithProfile(profile) {
 Module.showProfileSelector = function (callback) {
     Module._profileCallback = callback;
     _trxEngineStarting = false;
+    if (Module.setTouchControlsVisible) {
+        Module.setTouchControlsVisible(false);
+    }
     _trxShowProfileSelector(callback);
 };
 
