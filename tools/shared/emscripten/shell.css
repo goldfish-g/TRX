@@ -547,12 +547,9 @@ html, body { width: 100%; height: 100dvh; overflow: hidden; background: #000; }
     --base-bottom: 5dvh;
     --action-right: calc(var(--base-right) + var(--main-size) * 0.86);
     --action-bottom: calc(var(--base-bottom) + var(--main-size) * 0.86);
-    --jump-center-right: calc(var(--base-right) + (var(--main-size) / 2));
-    --jump-center-bottom: calc(var(--base-bottom) + (var(--main-size) / 2));
     --action-center-right: calc(var(--action-right) + (var(--main-size) / 2));
     --action-center-bottom: calc(var(--action-bottom) + (var(--main-size) / 2));
-    --grid-step-x: calc(var(--action-center-right) - var(--jump-center-right));
-    --grid-step-y: calc(var(--action-center-bottom) - var(--jump-center-bottom));
+    --orbit-r: calc(var(--main-size) * 0.86);
 }
 .tc-btn {
     position: absolute;
@@ -665,22 +662,43 @@ html, body { width: 100%; height: 100dvh; overflow: hidden; background: #000; }
     height: var(--orbit-size);
     font-size: clamp(18px, 3.4vmin, 26px);
 }
-/* 3x2 center-aligned grid with fixed Action (top-center) and Jump (bottom-right) */
-.tc-walk {
-    right: calc(var(--action-center-right) + var(--grid-step-x) - (var(--orbit-size) / 2));
-    bottom: calc(var(--action-center-bottom) - (var(--orbit-size) / 2));
+/* Circular orbit: buttons at 45-degree intervals around Action centre */
+.tc-sprint { /* 0° – right */
+    right: calc(var(--action-center-right) - var(--orbit-r) - var(--orbit-size) / 2);
+    bottom: calc(var(--action-center-bottom) - var(--orbit-size) / 2);
 }
-.tc-roll {
-    right: calc(var(--jump-center-right) - (var(--orbit-size) / 2));
-    bottom: calc(var(--action-center-bottom) - (var(--orbit-size) / 2));
+.tc-crouch { /* 45° – upper-right */
+    right: calc(var(--action-center-right) - 0.7071 * var(--orbit-r) - var(--orbit-size) / 2);
+    bottom: calc(var(--action-center-bottom) + 0.7071 * var(--orbit-r) - var(--orbit-size) / 2);
 }
-.tc-look {
-    right: calc(var(--action-center-right) + var(--grid-step-x) - (var(--orbit-size) / 2));
-    bottom: calc(var(--jump-center-bottom) - (var(--orbit-size) / 2));
+.tc-guns { /* default (non-TR3): 0° – right, where sprint would be */
+    right: calc(var(--action-center-right) - var(--orbit-r) - var(--orbit-size) / 2);
+    bottom: calc(var(--action-center-bottom) - var(--orbit-size) / 2);
 }
-.tc-guns {
-    right: calc(var(--action-center-right) - (var(--orbit-size) / 2));
-    bottom: calc(var(--jump-center-bottom) - (var(--orbit-size) / 2));
+#touch-controls.engine-3 .tc-guns { /* TR3: 90° – above */
+    right: calc(var(--action-center-right) - var(--orbit-size) / 2);
+    bottom: calc(var(--action-center-bottom) + var(--orbit-r) - var(--orbit-size) / 2);
+}
+.tc-walk { /* 180° – left */
+    right: calc(var(--action-center-right) + var(--orbit-r) - var(--orbit-size) / 2);
+    bottom: calc(var(--action-center-bottom) - var(--orbit-size) / 2);
+}
+.tc-look { /* 225° – lower-left */
+    right: calc(var(--action-center-right) + 0.7071 * var(--orbit-r) - var(--orbit-size) / 2);
+    bottom: calc(var(--action-center-bottom) - 0.7071 * var(--orbit-r) - var(--orbit-size) / 2);
+}
+.tc-roll { /* 270° – below */
+    right: calc(var(--action-center-right) - var(--orbit-size) / 2);
+    bottom: calc(var(--action-center-bottom) - var(--orbit-r) - var(--orbit-size) / 2);
+}
+/* Sprint and Crouch only visible for TR3 (engine 3) */
+.tc-sprint,
+.tc-crouch {
+    display: none;
+}
+#touch-controls.engine-3 .tc-sprint,
+#touch-controls.engine-3 .tc-crouch {
+    display: flex;
 }
 
 /* Top bar */

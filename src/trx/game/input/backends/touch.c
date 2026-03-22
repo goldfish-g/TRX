@@ -19,12 +19,14 @@ void Touch_SetState(const int32_t role, const int32_t pressed)
 EM_JS(void, js_export_input_roles, (
     int up, int down, int left, int right,
     int slow, int jump, int action, int draw_weapon,
-    int look, int roll, int inventory, int pause), {
+    int look, int roll, int sprint, int crouch,
+    int inventory, int pause), {
     Module.INPUT_ROLE = {
         UP: up, DOWN: down, LEFT: left, RIGHT: right,
         SLOW: slow, JUMP: jump, ACTION: action,
         DRAW_WEAPON: draw_weapon, LOOK: look,
-        ROLL: roll, INVENTORY: inventory, PAUSE: pause,
+        ROLL: roll, SPRINT: sprint, CROUCH: crouch,
+        INVENTORY: inventory, PAUSE: pause,
     };
 })
 // clang-format on
@@ -35,7 +37,8 @@ static void M_Init(void)
         INPUT_ROLE_UP, INPUT_ROLE_DOWN, INPUT_ROLE_LEFT, INPUT_ROLE_RIGHT,
         INPUT_ROLE_SLOW, INPUT_ROLE_JUMP, INPUT_ROLE_ACTION,
         INPUT_ROLE_DRAW_WEAPON, INPUT_ROLE_LOOK, INPUT_ROLE_ROLL,
-        INPUT_ROLE_INVENTORY, INPUT_ROLE_PAUSE);
+        INPUT_ROLE_SPRINT, INPUT_ROLE_CROUCH, INPUT_ROLE_INVENTORY,
+        INPUT_ROLE_PAUSE);
 }
 
 static bool M_IsPressed(const INPUT_LAYOUT layout, const INPUT_ROLE role)
