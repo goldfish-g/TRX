@@ -5,8 +5,7 @@
 // processing, writes files to the VFS, persists to IndexedDB, and
 // launches the game.
 //
-// Custom level profiles must include a pre-generated gameflow.json5
-// (produced by the TRX Level Converter service).
+// Custom level profiles must include a pre-generated gameflow.json5.
 //
 // Depends on: Emscripten FS             (global `FS`)
 //             GameDataManager           (from gamedata.js)
@@ -125,7 +124,7 @@ function _trxShowUploadUI(profile, callback, refresh) {
             gdm.loadMappedToFS(mappedFiles);
 
             // Custom level profiles must include a pre-generated
-            // gameflow.json5 (from the TRX Level Converter service).
+            // gameflow.json5.
             if (profile.modDir) {
                 var modPrefix = 'games/' + profile.modDir + '/';
                 var hasGameflow = false;
@@ -137,9 +136,8 @@ function _trxShowUploadUI(profile, callback, refresh) {
                 }
                 if (!hasGameflow) {
                     throw new Error(
-                        'This upload does not contain a valid TRX gameflow. '
-                        + 'Please convert your game files first using the '
-                        + 'TRX Level Converter before uploading.'
+                        'This does not appear to be a valid TRX level. '
+                        + 'Please make sure you upload a TRX level.'
                     );
                 }
             }
