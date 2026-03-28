@@ -39,6 +39,12 @@ SHELL_SIZE Shell_GetCurrentSize(void);
 SHELL_SIZE Shell_GetCurrentDisplaySize(void);
 
 // Platform-specific functions (flow_emscripten.c / flow_generic.c).
+void Shell_LoadModGameData(const char *mod_name);
+bool Shell_IsModKnownAvailable(const char *mod_name);
+const char *Shell_GetKnownModTitle(const char *mod_name);
+int32_t Shell_GetKnownModEngine(const char *mod_name);
+int32_t Shell_GetKnownModCount(void);
+const char *Shell_GetKnownModName(int32_t index);
 void Shell_InitIDBFS(void);
 void Shell_WaitForUserInput(void);
 void Shell_ShowProfileSelector(

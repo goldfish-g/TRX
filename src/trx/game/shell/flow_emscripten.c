@@ -1,4 +1,5 @@
 #include <trx/core/filesystem.h>
+#include <trx/core/memory.h>
 #include <trx/core/webgl_log.h>
 #include <trx/game/clock.h>
 #include <trx/game/shell.h>
@@ -8,6 +9,8 @@
 #include <emscripten.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 // clang-format off
 EM_JS(void, js_show_start_gate, (void), {
@@ -107,6 +110,24 @@ EM_JS(int, js_has_touch_support, (void), {
     return navigator.maxTouchPoints > 0 ? 1 : 0;
 })
 
+// --- Mod data loading ---
+
+EM_JS(void, js_load_mod_data, (const char *mod_name), {
+    var name = UTF8ToString(mod_name);
+    Module._modDataLoaded = false;
+    if (Module.loadModData) {
+        Module.loadModData(name, function() {
+            Module._modDataLoaded = true;
+        });
+    } else {
+        Module._modDataLoaded = true;
+    }
+})
+
+EM_JS(int, js_is_mod_data_loaded, (void), {
+    return Module._modDataLoaded ? 1 : 0;
+})
+
 // --- Profile selector ---
 
 EM_JS(void, js_show_profile_selector, (void), {
@@ -138,6 +159,158 @@ EM_JS(int, js_get_selected_engine, (void), {
 
 // setenv is POSIX but not declared under strict C standard modes.
 int setenv(const char *name, const char *value, int overwrite);
+
+void Shell_LoadModGameData(const char *const mod_name)
+{
+    js_load_mod_data(mod_name);
+    while (!js_is_mod_data_loaded()) {
+        Clock_Delay(10);
+    }
+}
+
+// Parse /available_mods.txt written by the JS shell before callMain().
+// Format: one entry per line, "mod_name|display_title".
+static char *m_Manifest = nullptr;
+
+static void M_EnsureManifestLoaded(void)
+{
+    if (m_Manifest != nullptr) {
+        return;
+    }
+    FILE *f = fopen("/available_mods.txt", "r");
+    if (f == nullptr) {
+        m_Manifest = Memory_Alloc(1);
+        m_Manifest[0] = '\0';
+        return;
+    }
+    fseek(f, 0, SEEK_END);
+    const long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    m_Manifest = Memory_Alloc(size + 1);
+    fread(m_Manifest, 1, size, f);
+    m_Manifest[size] = '\0';
+    fclose(f);
+}
+
+// Find the start of a manifest line matching mod_name, returning a pointer
+// to the beginning of that line, or nullptr if not found.
+static const char *M_FindManifestLine(const char *const mod_name)
+{
+    M_EnsureManifestLoaded();
+    const size_t name_len = strlen(mod_name);
+    const char *p = m_Manifest;
+    while (*p != '\0') {
+        const char *eol = strchr(p, '\n');
+        if (eol == nullptr) {
+            eol = p + strlen(p);
+        }
+        // Check if line starts with "mod_name|"
+        if ((size_t)(eol - p) > name_len && strncmp(p, mod_name, name_len) == 0
+            && p[name_len] == '|') {
+            return p;
+        }
+        p = *eol != '\0' ? eol + 1 : eol;
+    }
+    return nullptr;
+}
+
+bool Shell_IsModKnownAvailable(const char *const mod_name)
+{
+    return M_FindManifestLine(mod_name) != nullptr;
+}
+
+// Format: "mod_name|title|engine\n"
+// Returns a pointer to the title field (between first and second '|'),
+// or nullptr if not found.
+const char *Shell_GetKnownModTitle(const char *const mod_name)
+{
+    const char *const line = M_FindManifestLine(mod_name);
+    if (line == nullptr) {
+        return nullptr;
+    }
+    const char *const pipe1 = strchr(line, '|');
+    if (pipe1 == nullptr) {
+        return nullptr;
+    }
+    const char *const title_start = pipe1 + 1;
+    const char *title_end = strchr(title_start, '|');
+    if (title_end == nullptr) {
+        title_end = strchr(title_start, '\n');
+    }
+    if (title_end == nullptr) {
+        title_end = title_start + strlen(title_start);
+    }
+    if (title_end == title_start) {
+        return nullptr;
+    }
+    const size_t len = title_end - title_start;
+    char *title = Memory_Alloc(len + 1);
+    memcpy(title, title_start, len);
+    title[len] = '\0';
+    return title;
+}
+
+int32_t Shell_GetKnownModCount(void)
+{
+    M_EnsureManifestLoaded();
+    int32_t count = 0;
+    const char *p = m_Manifest;
+    while (*p != '\0') {
+        const char *eol = strchr(p, '\n');
+        if (eol == nullptr) {
+            eol = p + strlen(p);
+        }
+        if (eol > p && strchr(p, '|') != nullptr) {
+            count++;
+        }
+        p = *eol != '\0' ? eol + 1 : eol;
+    }
+    return count;
+}
+
+const char *Shell_GetKnownModName(const int32_t index)
+{
+    M_EnsureManifestLoaded();
+    int32_t cur = 0;
+    const char *p = m_Manifest;
+    while (*p != '\0') {
+        const char *eol = strchr(p, '\n');
+        if (eol == nullptr) {
+            eol = p + strlen(p);
+        }
+        const char *pipe = strchr(p, '|');
+        if (eol > p && pipe != nullptr && pipe < eol) {
+            if (cur == index) {
+                const size_t len = pipe - p;
+                char *name = Memory_Alloc(len + 1);
+                memcpy(name, p, len);
+                name[len] = '\0';
+                return name;
+            }
+            cur++;
+        }
+        p = *eol != '\0' ? eol + 1 : eol;
+    }
+    return nullptr;
+}
+
+int32_t Shell_GetKnownModEngine(const char *const mod_name)
+{
+    const char *const line = M_FindManifestLine(mod_name);
+    if (line == nullptr) {
+        return 0;
+    }
+    // Find the second '|' to get the engine field
+    const char *const pipe1 = strchr(line, '|');
+    if (pipe1 == nullptr) {
+        return 0;
+    }
+    const char *const pipe2 = strchr(pipe1 + 1, '|');
+    if (pipe2 == nullptr) {
+        return 0;
+    }
+    return atoi(pipe2 + 1);
+}
 
 void Shell_InitIDBFS(void)
 {

@@ -122,8 +122,8 @@ mkdir -p "$GAMEDATA_STAGE"
 
 # --- Always staged: common config + shaders ---
 echo ">>> Staging common config and shaders..."
-cp -r "$DATA_ROOT/common/ship/cfg" "$VFS_STAGE/cfg"
-cp -r "$DATA_ROOT/common/ship/shaders" "$VFS_STAGE/cfg/shaders"
+cp -rL "$DATA_ROOT/common/ship/cfg" "$VFS_STAGE/cfg"
+cp -rL "$DATA_ROOT/common/ship/shaders" "$VFS_STAGE/cfg/shaders"
 
 # --- Always staged: per-engine ship config + data ---
 # Each engine's base game and expansion dirs get gameflow, strings,
@@ -140,23 +140,23 @@ stage_base_game() {
 
     # Gameflow and strings from the mod's config subdir
     if [ -d "$src_cfg/$mod" ]; then
-        cp "$src_cfg/$mod"/*.json5 "$dst/" 2>/dev/null || true
+        cp -L "$src_cfg/$mod"/*.json5 "$dst/" 2>/dev/null || true
     fi
 
     # Catalogs, inv_ring, weapons from the engine config root
-    cp "$src_cfg"/catalog_*.csv "$dst/" 2>/dev/null || true
-    cp "$src_cfg"/inv_ring.json5 "$dst/" 2>/dev/null || true
-    cp "$src_cfg"/weapons.json5 "$dst/" 2>/dev/null || true
+    cp -L "$src_cfg"/catalog_*.csv "$dst/" 2>/dev/null || true
+    cp -L "$src_cfg"/inv_ring.json5 "$dst/" 2>/dev/null || true
+    cp -L "$src_cfg"/weapons.json5 "$dst/" 2>/dev/null || true
 
     # Ship data: injections, scripts, images
     if [ -d "$src_data/injections" ]; then
-        cp -r "$src_data/injections" "$dst/injections"
+        cp -rL "$src_data/injections" "$dst/injections"
     fi
     if [ -d "$src_data/scripts" ]; then
-        cp -r "$src_data/scripts" "$dst/scripts"
+        cp -rL "$src_data/scripts" "$dst/scripts"
     fi
     if [ -d "$src_data/images" ]; then
-        cp -r "$src_data/images" "$dst/images"
+        cp -rL "$src_data/images" "$dst/images"
     fi
 }
 
@@ -170,7 +170,7 @@ stage_expansion() {
 
     # Expansion only needs gameflow + strings (shared data via base fallback)
     if [ -d "$src_cfg/$mod" ]; then
-        cp "$src_cfg/$mod"/*.json5 "$dst/" 2>/dev/null || true
+        cp -L "$src_cfg/$mod"/*.json5 "$dst/" 2>/dev/null || true
     fi
 }
 

@@ -21,7 +21,7 @@ typedef struct {
 } SHELL_MOD;
 
 void Shell_ScanAvailableMods(void);
-void Shell_ValidateMods(void);
+void Shell_ValidateMods(const char *current_mod_name);
 int32_t Shell_GetModCount(void);
 const SHELL_MOD *Shell_GetMod(int32_t index);
 const SHELL_MOD *Shell_GetModByName(const char *name);

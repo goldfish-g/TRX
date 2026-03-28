@@ -13,6 +13,46 @@
 'use strict';
 
 // ---------------------------------------------------------------------------
+// Available mods manifest
+// ---------------------------------------------------------------------------
+
+// Write a file to the Emscripten VFS listing all mods that have game data
+// in IndexedDB.  The C mod system reads this synchronously during startup
+// to know which profiles are available for "Switch Game".
+function _trxWriteAvailableModsManifest(pm) {
+    return pm.listProfiles().then(function (profiles) {
+        var checks = profiles.map(function (p) {
+            return pm.hasGameData(p.id).then(function (has) {
+                if (!has) return null;
+                var modDef = MOD_DEFINITIONS[p.mod] || {};
+                return {
+                    mod: p.modDir || p.mod,
+                    title: p.name || modDef.label || p.mod,
+                    engine: p.engine || (modDef ? modDef.engine : 0),
+                };
+            });
+        });
+        return Promise.all(checks);
+    }).then(function (results) {
+        var entries = results.filter(function (e) { return e !== null; });
+        // Deduplicate by mod name
+        var seen = {};
+        var lines = [];
+        for (var i = 0; i < entries.length; i++) {
+            if (!seen[entries[i].mod]) {
+                seen[entries[i].mod] = true;
+                lines.push(entries[i].mod + '|' + entries[i].title + '|' + entries[i].engine);
+            }
+        }
+        try {
+            FS.writeFile('/available_mods.txt', lines.join('\n') + '\n');
+        } catch (e) {
+            console.warn('[TRX] Failed to write available mods manifest:', e);
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Game startup
 // ---------------------------------------------------------------------------
 
@@ -51,6 +91,11 @@ function _trxStartGame(profile) {
     }
 
     dataReady.then(function () {
+        // Write available mods manifest to VFS before starting the engine.
+        // The C mod system reads this to know which profiles have game data
+        // (only one game's data is in the VFS at a time).
+        return _trxWriteAvailableModsManifest(pm);
+    }).then(function () {
         document.getElementById('progress-fill').style.width = '100%';
         document.getElementById('status').textContent = 'Starting...';
         document.getElementById('loading').classList.add('hidden');
@@ -113,6 +158,36 @@ function _trxResumeWithProfile(profile) {
         }
     });
 }
+
+// Load a mod's game data from IDB into the VFS.  Called from C when
+// switching mods via the in-game passport (not the profile selector).
+Module.loadModData = function (modName, callback) {
+    var pm = _trxProfileManager;
+    if (!pm) {
+        callback();
+        return;
+    }
+    pm.listProfiles().then(function (profiles) {
+        // Find the profile whose effective mod matches
+        for (var i = 0; i < profiles.length; i++) {
+            var p = profiles[i];
+            var effectiveMod = p.modDir || p.mod;
+            if (effectiveMod === modName) {
+                _trxCurrentProfile = p;
+                return pm.hasGameData(p.id).then(function (has) {
+                    if (has) {
+                        return pm.loadGameDataToFS(p.id);
+                    }
+                });
+            }
+        }
+    }).then(function () {
+        callback();
+    }).catch(function (err) {
+        console.error('[TRX] loadModData failed:', err);
+        callback();
+    });
+};
 
 // Show profile selector overlay. Used on initial load and when
 // returning from Exit Game (called from C via EM_JS).

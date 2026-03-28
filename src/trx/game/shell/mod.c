@@ -244,8 +244,12 @@ void Shell_ScanAvailableMods(void)
     for (int32_t i = 0; i < m_Mods->count; i++) {
         SHELL_MOD *const mod = Vector_Get(m_Mods, i);
         mod->is_available =
-            TRXPath_Exists(TRX_DYNAMIC_PATH_GAMEFLOW_FILE, mod->name);
+            TRXPath_Exists(TRX_DYNAMIC_PATH_GAMEFLOW_FILE, mod->name)
+            || Shell_IsModKnownAvailable(mod->name);
         mod->is_valid = mod->is_available;
+        if (mod->title == nullptr) {
+            mod->title = (char *)Shell_GetKnownModTitle(mod->name);
+        }
     }
 
     M_ValidateNoMixedModLayouts();
@@ -256,16 +260,47 @@ void Shell_ScanAvailableMods(void)
         SHELL_MOD *const mod = Vector_Get(m_Mods, i);
         if (mod->mod_type == MOD_CUSTOM) {
             mod->is_available =
-                TRXPath_Exists(TRX_DYNAMIC_PATH_GAMEFLOW_FILE, mod->name);
+                TRXPath_Exists(TRX_DYNAMIC_PATH_GAMEFLOW_FILE, mod->name)
+                || Shell_IsModKnownAvailable(mod->name);
             mod->is_valid = mod->is_available;
+            if (mod->title == nullptr) {
+                mod->title = (char *)Shell_GetKnownModTitle(mod->name);
+            }
         }
+    }
+
+    // Add mods known to the platform but not yet in the mod list
+    // (e.g. custom level profiles on WebGL stored in IndexedDB).
+    for (int32_t i = 0; i < Shell_GetKnownModCount(); i++) {
+        const char *name = Shell_GetKnownModName(i);
+        if (name == nullptr) {
+            continue;
+        }
+        if (M_FindMod(name) == nullptr) {
+            const int32_t engine = Shell_GetKnownModEngine(name);
+            // Derive base mod from the prefix (e.g. "tr1-level-xxx" → "tr1")
+            const char *base = nullptr;
+            if (strncmp(name, "tr1", 3) == 0) {
+                base = "tr1";
+            } else if (strncmp(name, "tr2", 3) == 0) {
+                base = "tr2";
+            } else if (strncmp(name, "tr3", 3) == 0) {
+                base = "tr3";
+            }
+            M_AddMod(
+                name, Shell_GetKnownModTitle(name), MOD_CUSTOM, engine, base);
+            SHELL_MOD *const mod = M_FindMod(name);
+            mod->is_available = true;
+            mod->is_valid = true;
+        }
+        Memory_FreePointer(&name);
     }
 
     M_ReadModMetaForKnownMods();
     M_ValidateEngineVersions();
 }
 
-void Shell_ValidateMods(void)
+void Shell_ValidateMods(const char *const current_mod_name)
 {
     const int32_t original_tr_version = g_TRVersion;
 
@@ -273,6 +308,17 @@ void Shell_ValidateMods(void)
         SHELL_MOD *const mod = Vector_Get(m_Mods, i);
         if (!mod->is_available) {
             mod->is_valid = false;
+            continue;
+        }
+
+        // If the mod is known available from the platform (e.g. WebGL
+        // profile with IDB data) but is not the currently loaded game,
+        // trust the platform and skip validation — the full game data
+        // will be loaded into the VFS when the user switches to this mod.
+        if (Shell_IsModKnownAvailable(mod->name)
+            && (current_mod_name == nullptr
+                || strcmp(mod->name, current_mod_name) != 0)) {
+            mod->is_valid = true;
             continue;
         }
 

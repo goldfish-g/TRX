@@ -1,7 +1,42 @@
 #include <trx/game/shell.h>
 
 #include <SDL2/SDL.h>
+#include <stdbool.h>
 #include <stdint.h>
+
+void Shell_LoadModGameData(const char *const mod_name)
+{
+    (void)mod_name;
+}
+
+bool Shell_IsModKnownAvailable(const char *const mod_name)
+{
+    (void)mod_name;
+    return false;
+}
+
+const char *Shell_GetKnownModTitle(const char *const mod_name)
+{
+    (void)mod_name;
+    return nullptr;
+}
+
+int32_t Shell_GetKnownModCount(void)
+{
+    return 0;
+}
+
+const char *Shell_GetKnownModName(const int32_t index)
+{
+    (void)index;
+    return nullptr;
+}
+
+int32_t Shell_GetKnownModEngine(const char *const mod_name)
+{
+    (void)mod_name;
+    return 0;
+}
 
 void Shell_InitIDBFS(void)
 {

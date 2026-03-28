@@ -73,4 +73,5 @@ INPUT_BACKEND_IMPL g_Input_Touch = {
     .assign_to_json_object = nullptr,
     .reset_layout = nullptr,
     .read_and_assign = nullptr,
+    .resolve_combos = nullptr,
 };
