@@ -16,32 +16,23 @@
 // Available mods manifest
 // ---------------------------------------------------------------------------
 
-// Write a file to the Emscripten VFS listing all mods that have game data
-// in IndexedDB.  The C mod system reads this synchronously during startup
-// to know which profiles are available for "Switch Game".
+// Write a file to the Emscripten VFS listing all known profiles.
+// The C mod system reads this synchronously during startup to know
+// which profiles are available for "Switch Game" — including ones
+// whose game data has not been downloaded yet.
 function _trxWriteAvailableModsManifest(pm) {
     return pm.listProfiles().then(function (profiles) {
-        var checks = profiles.map(function (p) {
-            return pm.hasGameData(p.id).then(function (has) {
-                if (!has) return null;
-                var modDef = MOD_DEFINITIONS[p.mod] || {};
-                return {
-                    mod: p.modDir || p.mod,
-                    title: p.name || modDef.label || p.mod,
-                    engine: p.engine || (modDef ? modDef.engine : 0),
-                };
-            });
-        });
-        return Promise.all(checks);
-    }).then(function (results) {
-        var entries = results.filter(function (e) { return e !== null; });
-        // Deduplicate by mod name
         var seen = {};
         var lines = [];
-        for (var i = 0; i < entries.length; i++) {
-            if (!seen[entries[i].mod]) {
-                seen[entries[i].mod] = true;
-                lines.push(entries[i].mod + '|' + entries[i].title + '|' + entries[i].engine);
+        for (var i = 0; i < profiles.length; i++) {
+            var p = profiles[i];
+            var mod = p.modDir || p.mod;
+            if (!seen[mod]) {
+                seen[mod] = true;
+                var modDef = MOD_DEFINITIONS[p.mod] || {};
+                var title = p.name || modDef.label || p.mod;
+                var engine = p.engine || (modDef ? modDef.engine : 0);
+                lines.push(mod + '|' + title + '|' + engine);
             }
         }
         try {
@@ -159,8 +150,10 @@ function _trxResumeWithProfile(profile) {
     });
 }
 
-// Load a mod's game data from IDB into the VFS.  Called from C when
-// switching mods via the in-game passport (not the profile selector).
+// Load a mod's game data into the VFS.  Called from C when switching
+// mods via the in-game passport (not the profile selector).
+// If the data is already cached in IDB it is loaded directly;
+// otherwise the bundled data package is downloaded with a progress bar.
 Module.loadModData = function (modName, callback) {
     var pm = _trxProfileManager;
     if (!pm) {
@@ -177,6 +170,21 @@ Module.loadModData = function (modName, callback) {
                 return pm.hasGameData(p.id).then(function (has) {
                     if (has) {
                         return pm.loadGameDataToFS(p.id);
+                    }
+                    if (p.dataPackage) {
+                        document.getElementById('loading').classList.remove('hidden');
+                        document.getElementById('canvas').style.display = 'none';
+                        document.getElementById('status').textContent = 'Downloading...';
+                        document.getElementById('progress-fill').style.width = '0%';
+                        return pm.loadBundledToFS(p.id, p.dataPackage, function (msg, frac) {
+                            document.getElementById('status').textContent = msg;
+                            if (frac >= 0) {
+                                document.getElementById('progress-fill').style.width = Math.round(frac * 100) + '%';
+                            }
+                        }).then(function () {
+                            document.getElementById('loading').classList.add('hidden');
+                            document.getElementById('canvas').style.display = '';
+                        });
                     }
                 });
             }
