@@ -33,6 +33,7 @@ bool Shell_GetPrevQuiet(void);
 const SHELL_ARGS *Shell_GetArgs(void);
 
 bool Shell_IsFullscreen(void);
+bool Shell_HasTouchSupport(void);
 SHELL_SIZE Shell_GetDefaultSize(void);
 SHELL_SIZE Shell_GetWindowSize(void);
 SHELL_SIZE Shell_GetCurrentSize(void);

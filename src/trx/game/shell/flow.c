@@ -39,6 +39,7 @@
 #include <trx/game/sound.h>
 #include <trx/game/stats.h>
 #include <trx/game/ui/settings.h>
+#include <trx/game/ui/touch_overlay.h>
 #include <trx/gl/context.h>
 #include <trx/version.h>
 
@@ -296,6 +297,12 @@ static void M_PrepareSystem(void)
     }
     Config_SubscribeChanges(M_HandleConfigChange, nullptr);
 
+    // Auto-enable touch controls on first run if touch hardware is present.
+    if (!g_Config.loaded && Shell_HasTouchSupport()) {
+        g_Config.input.enable_touch_controls = true;
+    }
+    TouchOverlay_SetVisible(g_Config.input.enable_touch_controls);
+
     Clock_SetSimSpeed(Clock_GetSpeedMultiplier());
     if (!s->args->headless) {
         Sound_Init();
@@ -308,6 +315,11 @@ static void M_PrepareSystem(void)
                                                       : Clock_GetCurrentFPS();
         Clock_EnableHeadlessFixedFPS(fps);
     }
+}
+
+bool Shell_HasTouchSupport(void)
+{
+    return SDL_GetNumTouchDevices() > 0;
 }
 
 SDL_Window *Shell_GetWindow(void)

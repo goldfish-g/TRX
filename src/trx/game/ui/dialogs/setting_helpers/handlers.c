@@ -6,6 +6,7 @@
 #include <trx/game/gun.h>
 #include <trx/game/music.h>
 #include <trx/game/objects/common.h>
+#include <trx/game/shell/common.h>
 #include <trx/game/sound.h>
 #include <trx/game/stats.h>
 #include <trx/game/ui/dialogs/settings_editor.h>
@@ -246,4 +247,15 @@ bool UI_Settings_ProjectileAreaDamage_IsAvailable(
 {
     return g_Weapons[LGT_ROCKET].is_available
         || g_Weapons[LGT_GRENADE].is_available;
+}
+
+bool UI_Settings_TouchControls_IsAvailable(
+    const UI_SETTINGS_OPTION *const option)
+{
+    return Shell_HasTouchSupport();
+}
+
+bool UI_Settings_TouchOption_IsAvailable(const UI_SETTINGS_OPTION *const option)
+{
+    return Shell_HasTouchSupport() && g_Config.input.enable_touch_controls;
 }

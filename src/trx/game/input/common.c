@@ -6,6 +6,7 @@
 #include <trx/game/game_strings/entries.h>
 #include <trx/game/input/backends/controller.h>
 #include <trx/game/input/backends/keyboard.h>
+#include <trx/game/input/backends/touch.h>
 #include <trx/version.h>
 
 #include <SDL2/SDL_keyboard.h>
@@ -153,6 +154,9 @@ void Input_Init(void)
     if (g_Input_Controller.init != nullptr) {
         g_Input_Controller.init();
     }
+    if (g_Input_Touch.init != nullptr) {
+        g_Input_Touch.init();
+    }
 }
 
 void Input_Shutdown(void)
@@ -162,6 +166,9 @@ void Input_Shutdown(void)
     }
     if (g_Input_Controller.shutdown != nullptr) {
         g_Input_Controller.shutdown();
+    }
+    if (g_Input_Touch.shutdown != nullptr) {
+        g_Input_Touch.shutdown();
     }
 }
 
@@ -277,6 +284,9 @@ void Input_ProcessEvent(const SDL_Event *event)
     }
     if (g_Input_Controller.process_event != nullptr) {
         g_Input_Controller.process_event(event);
+    }
+    if (g_Input_Touch.process_event != nullptr) {
+        g_Input_Touch.process_event(event);
     }
 }
 
