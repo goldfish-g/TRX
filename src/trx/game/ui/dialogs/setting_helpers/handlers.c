@@ -255,7 +255,19 @@ bool UI_Settings_TouchControls_IsAvailable(
     return Shell_HasTouchSupport();
 }
 
+bool UI_Settings_TouchControls_CanChange(
+    const UI_SETTINGS_OPTION *const option, const int32_t dir)
+{
+    return Shell_HasTouchSupport();
+}
+
 bool UI_Settings_TouchOption_IsAvailable(const UI_SETTINGS_OPTION *const option)
+{
+    return Shell_HasTouchSupport() && g_Config.input.enable_touch_controls;
+}
+
+bool UI_Settings_TouchOption_CanChange(
+    const UI_SETTINGS_OPTION *const option, const int32_t dir)
 {
     return Shell_HasTouchSupport() && g_Config.input.enable_touch_controls;
 }
