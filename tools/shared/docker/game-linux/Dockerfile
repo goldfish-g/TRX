@@ -70,11 +70,12 @@ RUN cd FFmpeg \
 # SDL
 FROM base AS sdl
 RUN git clone https://github.com/libsdl-org/SDL -b SDL2
-RUN apt-get install -y \
+RUN apt-get update && apt-get install -y \
     libgl1-mesa-dev \
     libglu1-mesa-dev \
     libpulse-dev \
     libasound2-dev \
+    libudev-dev \
     libxkbcommon-dev \
     libwayland-client0 \
     libwayland-cursor0 \
@@ -82,6 +83,7 @@ RUN apt-get install -y \
     libwayland-egl1 \
     automake \
     gcc \
+    libxi-dev \
     libxrandr-dev \
     libxext-dev
 RUN cd SDL \
