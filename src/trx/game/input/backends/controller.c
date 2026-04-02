@@ -37,6 +37,18 @@ static BUILTIN_CONTROLLER_LAYOUT m_BuiltinLayout[] = {
     { -1, { 0, { 0 }, 0 } },
 };
 
+#undef INPUT_CONTROLLER_ASSIGN_BUTTON
+#undef INPUT_CONTROLLER_ASSIGN_AXIS
+static BUILTIN_CONTROLLER_LAYOUT m_ModernBuiltinLayout[] = {
+#define INPUT_CONTROLLER_ASSIGN_BUTTON(role, bind)                             \
+    { role, { BT_BUTTON, { .button = bind }, 0 } },
+#define INPUT_CONTROLLER_ASSIGN_AXIS(role, bind, axis_dir)                     \
+    { role, { BT_AXIS, { .axis = bind }, axis_dir } },
+#include <trx/game/input/backends/controller_modern.def>
+    // guard
+    { -1, { 0, { 0 }, 0 } },
+};
+
 // clang-format off
 #define M_ICON_X              "\\{controller button cross}"
 #define M_ICON_CIRCLE         "\\{controller button circle}"
@@ -105,6 +117,12 @@ typedef struct {
 static CONTROLLER_ROLE_BINDING m_Layout[INPUT_LAYOUT_NUMBER_OF]
                                        [INPUT_ROLE_NUMBER_OF];
 
+// Bank storage for dual control schemes
+static CONTROLLER_ROLE_BINDING
+    m_ClassicBank[INPUT_LAYOUT_NUMBER_OF][INPUT_ROLE_NUMBER_OF];
+static CONTROLLER_ROLE_BINDING
+    m_ModernBank[INPUT_LAYOUT_NUMBER_OF][INPUT_ROLE_NUMBER_OF];
+
 static SDL_GameController *m_Controller = nullptr;
 static const char *m_ControllerName = nullptr;
 static SDL_GameControllerType m_ControllerType = SDL_CONTROLLER_TYPE_UNKNOWN;
@@ -114,6 +132,7 @@ static bool m_Conflicts[INPUT_LAYOUT_NUMBER_OF][INPUT_ROLE_NUMBER_OF] = {};
 // Internal controller state tables updated via SDL events
 static bool m_ButtonState[SDL_CONTROLLER_BUTTON_MAX] = {};
 static int16_t m_AxisState[SDL_CONTROLLER_AXIS_MAX] = {};
+static int16_t m_RawAxisState[SDL_CONTROLLER_AXIS_MAX] = {};
 
 static const char *M_GetButtonName(const SDL_GameControllerButton button)
 {
@@ -218,6 +237,7 @@ static void M_ProcessEvent(const SDL_Event *const event)
         break;
     case SDL_CONTROLLERAXISMOTION: {
         const Sint16 value = event->caxis.value;
+        m_RawAxisState[event->caxis.axis] = value;
         if (value < -SDL_JOYSTICK_AXIS_MAX / 2) {
             m_AxisState[event->caxis.axis] = -1;
         } else if (value > SDL_JOYSTICK_AXIS_MAX / 2) {
@@ -246,6 +266,14 @@ static int16_t M_JoyAxis(const SDL_GameControllerAxis axis)
         return false;
     }
     return m_AxisState[axis];
+}
+
+int16_t Input_Controller_GetRawAxis(const SDL_GameControllerAxis axis)
+{
+    if (m_Controller == nullptr || axis == SDL_CONTROLLER_AXIS_INVALID) {
+        return 0;
+    }
+    return m_RawAxisState[axis];
 }
 
 static bool M_CheckMap(const CONTROLLER_MAP *const map)
@@ -457,6 +485,32 @@ static void M_Discover(void)
     m_Controller = M_FindController();
 }
 
+static void M_LoadBuiltin(
+    CONTROLLER_ROLE_BINDING target[][INPUT_ROLE_NUMBER_OF],
+    const BUILTIN_CONTROLLER_LAYOUT *const builtin_array)
+{
+    for (INPUT_ROLE role = 0; role < INPUT_ROLE_NUMBER_OF; role++) {
+        for (int32_t slot = 0; slot < INPUT_BINDING_SLOTS; slot++) {
+            target[INPUT_LAYOUT_DEFAULT][role].slots[slot] =
+                (CONTROLLER_BINDING) { .key_count = 0 };
+        }
+    }
+    for (int32_t i = 0; builtin_array[i].role != (INPUT_ROLE)-1; i++) {
+        const BUILTIN_CONTROLLER_LAYOUT *const builtin = &builtin_array[i];
+        target[INPUT_LAYOUT_DEFAULT][builtin->role].slots[0] =
+            (CONTROLLER_BINDING) {
+                .key_count = 1,
+                .keys = { builtin->map },
+            };
+    }
+    for (int32_t layout = INPUT_LAYOUT_CUSTOM_1;
+         layout < INPUT_LAYOUT_NUMBER_OF; layout++) {
+        for (INPUT_ROLE role = 0; role < INPUT_ROLE_NUMBER_OF; role++) {
+            target[layout][role] = target[INPUT_LAYOUT_DEFAULT][role];
+        }
+    }
+}
+
 static void M_Init(void)
 {
     // first, reset all roles to unbound
@@ -481,6 +535,10 @@ static void M_Init(void)
          layout < INPUT_LAYOUT_NUMBER_OF; layout++) {
         M_ResetLayout(layout);
     }
+
+    // Initialize both layout banks
+    memcpy(m_ClassicBank, m_Layout, sizeof(m_Layout));
+    M_LoadBuiltin(m_ModernBank, m_ModernBuiltinLayout);
 
     int32_t result = SDL_Init(SDL_INIT_GAMECONTROLLER | SDL_INIT_SENSOR);
     if (result < 0) {
@@ -1040,6 +1098,20 @@ static bool M_ReadAndAssign(
         return true;
     }
     return false;
+}
+
+void Input_Controller_SetScheme(const bool modern)
+{
+    if (modern) {
+        memcpy(m_ClassicBank, m_Layout, sizeof(m_Layout));
+        memcpy(m_Layout, m_ModernBank, sizeof(m_Layout));
+    } else {
+        memcpy(m_ModernBank, m_Layout, sizeof(m_Layout));
+        memcpy(m_Layout, m_ClassicBank, sizeof(m_Layout));
+    }
+    for (int32_t layout = 0; layout < INPUT_LAYOUT_NUMBER_OF; layout++) {
+        M_CheckConflicts(layout);
+    }
 }
 
 INPUT_BACKEND_IMPL g_Input_Controller = {

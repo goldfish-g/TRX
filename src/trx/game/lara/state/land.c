@@ -3,6 +3,7 @@
 #include <trx/game/gun.h>
 #include <trx/game/input.h>
 #include <trx/game/lara.h>
+#include <trx/game/lara/modern.h>
 #include <trx/game/lara/util.h>
 #include <trx/game/random.h>
 #include <trx/game/rooms.h>
@@ -91,12 +92,14 @@ static void M_Walk(ITEM *const item, COLL_INFO *const coll)
     }
 
     LARA_INFO *const lara = Lara_GetLaraInfo();
-    if (g_Input.left) {
-        lara->turn_rate -= LARA_TURN_RATE;
-        CLAMPL(lara->turn_rate, -LARA_SLOW_TURN);
-    } else if (g_Input.right) {
-        lara->turn_rate += LARA_TURN_RATE;
-        CLAMPG(lara->turn_rate, +LARA_SLOW_TURN);
+    if (!Lara_ModernTurn(LARA_TURN_RATE, LARA_SLOW_TURN)) {
+        if (g_Input.left) {
+            lara->turn_rate -= LARA_TURN_RATE;
+            CLAMPL(lara->turn_rate, -LARA_SLOW_TURN);
+        } else if (g_Input.right) {
+            lara->turn_rate += LARA_TURN_RATE;
+            CLAMPG(lara->turn_rate, +LARA_SLOW_TURN);
+        }
     }
 
     if (g_Input.forward) {
@@ -190,16 +193,19 @@ static void M_Run(ITEM *const item, COLL_INFO *const coll)
         return;
     }
 
-    if (g_Input.left) {
-        lara->turn_rate -= LARA_TURN_RATE;
-        CLAMPL(lara->turn_rate, -M_FAST_TURN);
-        item->rot.z -= LARA_LEAN_RATE;
-        CLAMPL(item->rot.z, -LARA_LEAN_MAX);
-    } else if (g_Input.right) {
-        lara->turn_rate += LARA_TURN_RATE;
-        CLAMPG(lara->turn_rate, +M_FAST_TURN);
-        item->rot.z += LARA_LEAN_RATE;
-        CLAMPG(item->rot.z, +LARA_LEAN_MAX);
+    if (!Lara_ModernTurnWithLean(
+            LARA_TURN_RATE, M_FAST_TURN, LARA_LEAN_RATE, LARA_LEAN_MAX)) {
+        if (g_Input.left) {
+            lara->turn_rate -= LARA_TURN_RATE;
+            CLAMPL(lara->turn_rate, -M_FAST_TURN);
+            item->rot.z -= LARA_LEAN_RATE;
+            CLAMPL(item->rot.z, -LARA_LEAN_MAX);
+        } else if (g_Input.right) {
+            lara->turn_rate += LARA_TURN_RATE;
+            CLAMPG(lara->turn_rate, +M_FAST_TURN);
+            item->rot.z += LARA_LEAN_RATE;
+            CLAMPG(item->rot.z, +LARA_LEAN_MAX);
+        }
     }
 
     const bool responsive_jumping =
@@ -249,16 +255,20 @@ static void M_Wade(ITEM *const item, COLL_INFO *const coll)
 
     const ROOM *const room = Room_Get(item->room_num);
     if (room->flags.swamp) {
-        if (g_Input.left) {
-            lara->turn_rate -= LARA_TURN_RATE;
-            CLAMPL(lara->turn_rate, -LARA_SLOW_TURN);
-            item->rot.z -= LARA_LEAN_RATE;
-            CLAMPL(item->rot.z, -LARA_LEAN_MAX / 2);
-        } else if (g_Input.right) {
-            lara->turn_rate += LARA_TURN_RATE;
-            CLAMPG(lara->turn_rate, LARA_SLOW_TURN);
-            item->rot.z += LARA_LEAN_RATE;
-            CLAMPG(item->rot.z, LARA_LEAN_MAX / 2);
+        if (!Lara_ModernTurnWithLean(
+                LARA_TURN_RATE, LARA_SLOW_TURN, LARA_LEAN_RATE,
+                LARA_LEAN_MAX / 2)) {
+            if (g_Input.left) {
+                lara->turn_rate -= LARA_TURN_RATE;
+                CLAMPL(lara->turn_rate, -LARA_SLOW_TURN);
+                item->rot.z -= LARA_LEAN_RATE;
+                CLAMPL(item->rot.z, -LARA_LEAN_MAX / 2);
+            } else if (g_Input.right) {
+                lara->turn_rate += LARA_TURN_RATE;
+                CLAMPG(lara->turn_rate, LARA_SLOW_TURN);
+                item->rot.z += LARA_LEAN_RATE;
+                CLAMPG(item->rot.z, LARA_LEAN_MAX / 2);
+            }
         }
 
         if (g_Input.forward) {
@@ -267,16 +277,19 @@ static void M_Wade(ITEM *const item, COLL_INFO *const coll)
             item->goal_anim_state = LS(LS_STOP);
         }
     } else {
-        if (g_Input.left) {
-            lara->turn_rate -= LARA_TURN_RATE;
-            CLAMPL(lara->turn_rate, -M_FAST_TURN);
-            item->rot.z -= LARA_LEAN_RATE;
-            CLAMPL(item->rot.z, -LARA_LEAN_MAX);
-        } else if (g_Input.right) {
-            lara->turn_rate += LARA_TURN_RATE;
-            CLAMPG(lara->turn_rate, M_FAST_TURN);
-            item->rot.z += LARA_LEAN_RATE;
-            CLAMPG(item->rot.z, LARA_LEAN_MAX);
+        if (!Lara_ModernTurnWithLean(
+                LARA_TURN_RATE, M_FAST_TURN, LARA_LEAN_RATE, LARA_LEAN_MAX)) {
+            if (g_Input.left) {
+                lara->turn_rate -= LARA_TURN_RATE;
+                CLAMPL(lara->turn_rate, -M_FAST_TURN);
+                item->rot.z -= LARA_LEAN_RATE;
+                CLAMPL(item->rot.z, -LARA_LEAN_MAX);
+            } else if (g_Input.right) {
+                lara->turn_rate += LARA_TURN_RATE;
+                CLAMPG(lara->turn_rate, M_FAST_TURN);
+                item->rot.z += LARA_LEAN_RATE;
+                CLAMPG(item->rot.z, LARA_LEAN_MAX);
+            }
         }
 
         if (g_Input.forward) {
@@ -305,12 +318,14 @@ static void M_WalkBack(ITEM *const item, COLL_INFO *const coll)
         item->goal_anim_state = LS(LS_STOP);
     }
 
-    if (g_Input.left) {
-        lara->turn_rate -= LARA_TURN_RATE;
-        CLAMPL(lara->turn_rate, -LARA_SLOW_TURN);
-    } else if (g_Input.right) {
-        lara->turn_rate += LARA_TURN_RATE;
-        CLAMPG(lara->turn_rate, LARA_SLOW_TURN);
+    if (!g_Config.gameplay.enable_modern_controls) {
+        if (g_Input.left) {
+            lara->turn_rate -= LARA_TURN_RATE;
+            CLAMPL(lara->turn_rate, -LARA_SLOW_TURN);
+        } else if (g_Input.right) {
+            lara->turn_rate += LARA_TURN_RATE;
+            CLAMPG(lara->turn_rate, LARA_SLOW_TURN);
+        }
     }
 }
 
@@ -511,12 +526,14 @@ static void M_FastBack(ITEM *const item, COLL_INFO *const coll)
 {
     item->goal_anim_state = LS(LS_STOP);
     LARA_INFO *const lara = Lara_GetLaraInfo();
-    if (g_Input.left) {
-        lara->turn_rate -= LARA_TURN_RATE;
-        CLAMPL(lara->turn_rate, -LARA_MED_TURN);
-    } else if (g_Input.right) {
-        lara->turn_rate += LARA_TURN_RATE;
-        CLAMPG(lara->turn_rate, LARA_MED_TURN);
+    if (!g_Config.gameplay.enable_modern_controls) {
+        if (g_Input.left) {
+            lara->turn_rate -= LARA_TURN_RATE;
+            CLAMPL(lara->turn_rate, -LARA_MED_TURN);
+        } else if (g_Input.right) {
+            lara->turn_rate += LARA_TURN_RATE;
+            CLAMPG(lara->turn_rate, LARA_MED_TURN);
+        }
     }
 }
 
@@ -536,38 +553,62 @@ static void M_Turn(ITEM *const item, COLL_INFO *const coll)
     const bool turn_input = left_turn ? g_Input.left : g_Input.right;
 
     LARA_INFO *const lara = Lara_GetLaraInfo();
-    if (left_turn) {
-        lara->turn_rate -= LARA_TURN_RATE;
+
+    if (Lara_ModernTurn(LARA_TURN_RATE, LARA_SLOW_TURN)) {
+        // Modern controls: check if we've aligned with the target
+        const int32_t target32 = Lara_ModernGetTargetAngle();
+        if (target32 != MODERN_ANGLE_NONE) {
+            const int16_t delta = (int16_t)target32 - item->rot.y;
+            if (ABS(delta) < MODERN_FORWARD_ZONE) {
+                // Aligned — transition to movement
+                if (lara->water_status == LWS_WADE) {
+                    item->goal_anim_state = LS(LS_WADE);
+                } else if (g_Input.slow) {
+                    item->goal_anim_state = LS(LS_WALK);
+                } else {
+                    item->goal_anim_state = LS(LS_RUN);
+                }
+            }
+            // Fast turn escalation still applies
+            if (lara->gun_status == LGS_READY
+                || ABS(lara->turn_rate) > LARA_SLOW_TURN) {
+                item->goal_anim_state = LS(LS_FAST_TURN);
+            }
+        }
     } else {
-        lara->turn_rate += LARA_TURN_RATE;
-    }
+        if (left_turn) {
+            lara->turn_rate -= LARA_TURN_RATE;
+        } else {
+            lara->turn_rate += LARA_TURN_RATE;
+        }
 
-    if (lara->gun_status == LGS_READY) {
-        item->goal_anim_state = LS(LS_FAST_TURN);
-    } else if (left_turn && lara->turn_rate < -LARA_SLOW_TURN) {
-        if (g_Input.slow) {
-            lara->turn_rate = -LARA_SLOW_TURN;
-        } else {
+        if (lara->gun_status == LGS_READY) {
             item->goal_anim_state = LS(LS_FAST_TURN);
+        } else if (left_turn && lara->turn_rate < -LARA_SLOW_TURN) {
+            if (g_Input.slow) {
+                lara->turn_rate = -LARA_SLOW_TURN;
+            } else {
+                item->goal_anim_state = LS(LS_FAST_TURN);
+            }
+        } else if (!left_turn && lara->turn_rate > LARA_SLOW_TURN) {
+            if (g_Input.slow) {
+                lara->turn_rate = LARA_SLOW_TURN;
+            } else {
+                item->goal_anim_state = LS(LS_FAST_TURN);
+            }
         }
-    } else if (!left_turn && lara->turn_rate > LARA_SLOW_TURN) {
-        if (g_Input.slow) {
-            lara->turn_rate = LARA_SLOW_TURN;
-        } else {
-            item->goal_anim_state = LS(LS_FAST_TURN);
-        }
-    }
 
-    if (g_Input.forward) {
-        if (lara->water_status == LWS_WADE) {
-            item->goal_anim_state = LS(LS_WADE);
-        } else if (g_Input.slow) {
-            item->goal_anim_state = LS(LS_WALK);
-        } else {
-            item->goal_anim_state = LS(LS_RUN);
+        if (g_Input.forward) {
+            if (lara->water_status == LWS_WADE) {
+                item->goal_anim_state = LS(LS_WADE);
+            } else if (g_Input.slow) {
+                item->goal_anim_state = LS(LS_WALK);
+            } else {
+                item->goal_anim_state = LS(LS_RUN);
+            }
+        } else if (!turn_input) {
+            item->goal_anim_state = LS(LS_STOP);
         }
-    } else if (!turn_input) {
-        item->goal_anim_state = LS(LS_STOP);
     }
 }
 
@@ -584,15 +625,26 @@ static void M_FastTurn(ITEM *const item, COLL_INFO *const coll)
     }
 
     LARA_INFO *const lara = Lara_GetLaraInfo();
-    if (lara->turn_rate >= 0) {
-        lara->turn_rate = M_FAST_TURN;
-        if (!g_Input.right) {
-            item->goal_anim_state = LS(LS_STOP);
+    if (Lara_ModernTurn(LARA_TURN_RATE, M_FAST_TURN)) {
+        // Modern controls: check alignment to exit fast turn
+        const int32_t target32 = Lara_ModernGetTargetAngle();
+        if (target32 != MODERN_ANGLE_NONE) {
+            const int16_t delta = (int16_t)target32 - item->rot.y;
+            if (ABS(delta) < MODERN_FORWARD_ZONE) {
+                item->goal_anim_state = LS(LS_RUN);
+            }
         }
     } else {
-        lara->turn_rate = -M_FAST_TURN;
-        if (!g_Input.left) {
-            item->goal_anim_state = LS(LS_STOP);
+        if (lara->turn_rate >= 0) {
+            lara->turn_rate = M_FAST_TURN;
+            if (!g_Input.right) {
+                item->goal_anim_state = LS(LS_STOP);
+            }
+        } else {
+            lara->turn_rate = -M_FAST_TURN;
+            if (!g_Input.left) {
+                item->goal_anim_state = LS(LS_STOP);
+            }
         }
     }
 }
@@ -612,12 +664,14 @@ static void M_SideStep(ITEM *const item, COLL_INFO *const coll)
         item->goal_anim_state = LS(LS_STOP);
     }
 
-    if (g_Input.left) {
-        lara->turn_rate -= LARA_TURN_RATE;
-        CLAMPL(lara->turn_rate, -LARA_SLOW_TURN);
-    } else if (g_Input.right) {
-        lara->turn_rate += LARA_TURN_RATE;
-        CLAMPG(lara->turn_rate, LARA_SLOW_TURN);
+    if (!Lara_ModernTurn(LARA_TURN_RATE, LARA_SLOW_TURN)) {
+        if (g_Input.left) {
+            lara->turn_rate -= LARA_TURN_RATE;
+            CLAMPL(lara->turn_rate, -LARA_SLOW_TURN);
+        } else if (g_Input.right) {
+            lara->turn_rate += LARA_TURN_RATE;
+            CLAMPG(lara->turn_rate, LARA_SLOW_TURN);
+        }
     }
 }
 
@@ -755,16 +809,20 @@ static void M_Sprint(ITEM *const item, COLL_INFO *const coll)
         item->goal_anim_state = M_GetRunToCrouchState();
         return;
     }
-    if (g_Input.left) {
-        lara->turn_rate -= M_SPRINT_TURN_RATE;
-        CLAMPL(lara->turn_rate, -M_SPRINT_TURN_MAX);
-        item->rot.z -= LARA_LEAN_RATE;
-        CLAMPL(item->rot.z, -M_SPRINT_LEAN_MAX);
-    } else if (g_Input.right) {
-        lara->turn_rate += M_SPRINT_TURN_RATE;
-        CLAMPG(lara->turn_rate, M_SPRINT_TURN_MAX);
-        item->rot.z += LARA_LEAN_RATE;
-        CLAMPG(item->rot.z, M_SPRINT_LEAN_MAX);
+    if (!Lara_ModernTurnWithLean(
+            M_SPRINT_TURN_RATE, M_SPRINT_TURN_MAX, LARA_LEAN_RATE,
+            M_SPRINT_LEAN_MAX)) {
+        if (g_Input.left) {
+            lara->turn_rate -= M_SPRINT_TURN_RATE;
+            CLAMPL(lara->turn_rate, -M_SPRINT_TURN_MAX);
+            item->rot.z -= LARA_LEAN_RATE;
+            CLAMPL(item->rot.z, -M_SPRINT_LEAN_MAX);
+        } else if (g_Input.right) {
+            lara->turn_rate += M_SPRINT_TURN_RATE;
+            CLAMPG(lara->turn_rate, M_SPRINT_TURN_MAX);
+            item->rot.z += LARA_LEAN_RATE;
+            CLAMPG(item->rot.z, M_SPRINT_LEAN_MAX);
+        }
     }
 
     if (g_Input.jump && !item->gravity) {

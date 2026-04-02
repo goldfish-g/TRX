@@ -579,12 +579,23 @@ static void M_Chase(const ITEM *const item)
     };
 
     const M_SETTINGS *const settings = M_GetSettings();
-    const int16_t speed =
-        settings->override_chase_speed || g_Camera.fixed_camera
+    int16_t speed = settings->override_chase_speed || g_Camera.fixed_camera
         ? g_Camera.speed
         : settings->chase_speed;
-    M_SmartShift(&target, M_Shift);
-    M_Move(&target, speed);
+
+    if (g_Config.gameplay.enable_modern_controls) {
+        // Modern controls: keep the player's chosen angle. If a wall
+        // blocks the ideal position, LOS_Check clips to the exact wall
+        // point — giving smooth continuous zoom instead of discrete steps.
+        if (speed > 4) {
+            speed = 4;
+        }
+        LOS_Check(&g_Camera.target, &target, false);
+        M_Move(&target, speed);
+    } else {
+        M_SmartShift(&target, M_Shift);
+        M_Move(&target, speed);
+    }
 }
 
 static void M_Combat(const ITEM *const item)

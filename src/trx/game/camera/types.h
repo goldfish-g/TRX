@@ -49,6 +49,9 @@ typedef struct {
     // used for the manual camera control
     int16_t additional_angle;
     int16_t additional_elevation;
+
+    // decoupled camera yaw for modern controls (player-controlled only)
+    int16_t modern_cam_angle;
     GAME_VECTOR mic_pos;
 
     struct {

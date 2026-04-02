@@ -249,6 +249,10 @@ typedef struct {
         bool enable_responsive_sprint;
         bool enable_toggle_crouch;
         bool enable_toggle_sprint;
+        bool enable_modern_controls;
+        int32_t mouse_sensitivity;
+        bool invert_camera_x;
+        bool invert_camera_y;
         bool enable_slow_ledge_swing;
         int32_t idle_pose_timeout;
         bool enable_idle_pose_camera;

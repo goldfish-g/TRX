@@ -1,12 +1,19 @@
 #include <trx/game/camera/common.h>
 
 #include <trx/config.h>
+#include <trx/core/math/const.h>
+#include <trx/core/math/trig.h>
+#include <trx/core/utils.h>
 #include <trx/game/camera.h>
 #include <trx/game/input.h>
+#include <trx/game/input/analog.h>
+#include <trx/game/input/backends/keyboard.h>
 #include <trx/game/lara.h>
 #include <trx/game/matrix.h>
 #include <trx/game/random.h>
 #include <trx/game/rooms.h>
+
+#include <SDL2/SDL.h>
 
 #define M_CHASE_ELEVATION (WALL_L * 3 / 2) // = 1536
 
@@ -18,6 +25,9 @@ static const double m_ManualCameraMultiplier[11] = {
 };
 
 static bool m_IsChunky = false;
+static bool m_LastInputWasMouse = false;
+
+#define M_MODERN_CAM_CREEP DEG_1 // 1 deg/frame = ~3 sec for 90 deg
 static bool m_IsInitialised = false;
 
 static void M_OffsetAdditionalAngle(const int16_t delta)
@@ -91,6 +101,7 @@ void Camera_ResetPosition(void)
     g_Camera.fixed_camera = false;
     g_Camera.additional_angle = 0;
     g_Camera.additional_elevation = 0;
+    g_Camera.modern_cam_angle = Lara_GetItem()->rot.y;
     const LARA_INFO *const lara_info = Lara_GetLaraInfo();
     if (!lara_info->extra_anim) {
         g_Camera.type = CAM_CHASE;
@@ -193,6 +204,14 @@ void Camera_Update(void)
     }
 
     if (g_Camera.type != CAM_HEAVY || g_Camera.timer == -1) {
+        // Re-sync modern camera angle when returning to chase mode
+        // from fixed/look/combat cameras to prevent snapping.
+        if (g_Config.gameplay.enable_modern_controls
+            && g_Camera.type != CAM_CHASE) {
+            g_Camera.modern_cam_angle = Math_Atan(
+                g_Camera.target.z - g_Camera.pos.z,
+                g_Camera.target.x - g_Camera.pos.x);
+        }
         g_Camera.type = CAM_CHASE;
         g_Camera.num = NO_CAMERA;
         g_Camera.last_item = g_Camera.item;
@@ -234,6 +253,171 @@ void Camera_MoveManual(void)
     } else if (g_Input.camera_back) {
         M_OffsetAdditionalElevation(camera_delta);
     }
+}
+
+static bool m_MouseCaptured = false;
+
+static void M_EnsureMouseCaptured(const bool capture)
+{
+    if (capture != m_MouseCaptured) {
+        SDL_SetRelativeMouseMode(capture ? SDL_TRUE : SDL_FALSE);
+        m_MouseCaptured = capture;
+        // Drain any stale mouse delta from the mode switch
+        if (capture) {
+            int32_t dx, dy;
+            Input_Keyboard_GetMouseDelta(&dx, &dy);
+        }
+    }
+}
+
+// Read mouse motion delta and apply to yaw/elevation.
+// Returns true if mouse moved (sets m_LastInputWasMouse).
+static bool M_ProcessMouse(int16_t *yaw, int16_t *elev)
+{
+    int32_t mouse_dx = 0;
+    int32_t mouse_dy = 0;
+    Input_Keyboard_GetMouseDelta(&mouse_dx, &mouse_dy);
+    if (mouse_dx == 0 && mouse_dy == 0) {
+        return false;
+    }
+    m_LastInputWasMouse = true;
+    const int32_t sens = g_Config.gameplay.mouse_sensitivity;
+    *yaw = (int16_t)(mouse_dx * sens * DEG_1 / 16);
+    if (g_Config.gameplay.invert_camera_x) {
+        *yaw = -*yaw;
+    }
+    *elev = (int16_t)(mouse_dy * sens * DEG_1 / 16);
+    if (g_Config.gameplay.invert_camera_y) {
+        *elev = -*elev;
+    }
+    return true;
+}
+
+// Apply analog stick input to yaw/elevation.
+static void M_ProcessStick(
+    const int16_t stick_x, const int16_t stick_y, const int16_t speed,
+    int16_t *yaw, int16_t *elev)
+{
+    if (stick_x != 0) {
+        *yaw += (int16_t)((int32_t)stick_x * speed >> 7);
+    }
+    if (stick_y != 0) {
+        *elev += (int16_t)((int32_t)stick_y * speed >> 7);
+    }
+}
+
+void Camera_MoveModern(void)
+{
+    M_EnsureMouseCaptured(true);
+
+    const int16_t camera_speed = (int32_t)(DEG_90 / LOGIC_FPS)
+        * (double)m_ManualCameraMultiplier[g_Config.gameplay.camera_speed];
+
+    // Look mode: both sticks + mouse orbit the camera freely.
+    // Don't touch modern_cam_angle — it resumes when look is released.
+    if (g_Input.look) {
+        int16_t yaw_delta = 0;
+        int16_t elev_delta = 0;
+
+        int16_t mouse_yaw = 0, mouse_elev = 0;
+        if (M_ProcessMouse(&mouse_yaw, &mouse_elev)) {
+            yaw_delta -= mouse_yaw;
+            elev_delta -= mouse_elev;
+        }
+
+        // Left stick as camera
+        M_ProcessStick(
+            g_AnalogInput.stick_x, g_AnalogInput.stick_y, camera_speed,
+            &yaw_delta, &elev_delta);
+
+        // Right stick as camera
+        M_ProcessStick(
+            g_AnalogCamInput.stick_x, g_AnalogCamInput.stick_y, camera_speed,
+            &yaw_delta, &elev_delta);
+
+        if (yaw_delta != 0) {
+            M_OffsetAdditionalAngle(-yaw_delta);
+        }
+        if (elev_delta != 0) {
+            M_OffsetAdditionalElevation(-elev_delta);
+        }
+        return;
+    }
+
+    // Re-sync modern_cam_angle after look mode ends so the camera
+    // doesn't snap back to the pre-look position.
+    // Detect by checking if additional_angle was set by look mode.
+    // (Camera_Update resets additional_angle for CAM_LOOK each frame,
+    // so after look ends the type returns to CAM_CHASE.)
+
+    if (g_Input.camera_reset) {
+        g_Camera.modern_cam_angle = Lara_GetItem()->rot.y;
+        g_Camera.additional_angle = 0;
+        g_Camera.additional_elevation = 0;
+        return;
+    }
+
+    // Mouse camera control
+    int16_t mouse_yaw = 0, mouse_elev = 0;
+    if (M_ProcessMouse(&mouse_yaw, &mouse_elev)) {
+        g_Camera.modern_cam_angle += mouse_yaw;
+        int32_t new_elev = g_Camera.additional_elevation - mouse_elev;
+        CLAMP(new_elev, INT16_MIN, INT16_MAX);
+        g_Camera.additional_elevation = (int16_t)new_elev;
+    }
+
+    // Right stick yaw
+    if (g_AnalogCamInput.stick_x != 0) {
+        m_LastInputWasMouse = false;
+        int16_t yaw =
+            (int16_t)((int32_t)g_AnalogCamInput.stick_x * camera_speed >> 7);
+        if (g_Config.gameplay.invert_camera_x) {
+            yaw = -yaw;
+        }
+        g_Camera.modern_cam_angle += yaw;
+    }
+
+    // Right stick elevation (inverted by default: stick up = look up)
+    if (g_AnalogCamInput.stick_y != 0) {
+        m_LastInputWasMouse = false;
+        int16_t elev =
+            (int16_t)((int32_t)g_AnalogCamInput.stick_y * camera_speed >> 7);
+        if (g_Config.gameplay.invert_camera_y) {
+            elev = -elev;
+        }
+        int32_t new_elev = g_Camera.additional_elevation - elev;
+        CLAMP(new_elev, INT16_MIN, INT16_MAX);
+        g_Camera.additional_elevation = (int16_t)new_elev;
+    }
+
+    // Camera creep: slowly drift behind Lara when she is actually moving,
+    // not just when the stick is pressed. This prevents the camera from
+    // rotating while Lara is still turning to face the target direction.
+    // Only for controller (not mouse).
+    if (Lara_GetItem()->speed > 0 && !m_LastInputWasMouse
+        && g_AnalogCamInput.stick_x == 0 && g_AnalogCamInput.stick_y == 0) {
+        const int16_t lara_y = Lara_GetItem()->rot.y;
+        const int16_t cam_delta = lara_y - g_Camera.modern_cam_angle;
+        if (cam_delta > 0) {
+            g_Camera.modern_cam_angle += M_MODERN_CAM_CREEP;
+            if ((int16_t)(lara_y - g_Camera.modern_cam_angle) < 0) {
+                g_Camera.modern_cam_angle = lara_y;
+            }
+        } else if (cam_delta < 0) {
+            g_Camera.modern_cam_angle -= M_MODERN_CAM_CREEP;
+            if ((int16_t)(lara_y - g_Camera.modern_cam_angle) > 0) {
+                g_Camera.modern_cam_angle = lara_y;
+            }
+        }
+    }
+
+    // Decouple chase camera orbit from Lara's rotation.
+    // Chase orbit = additional_angle + lara_rot_y (in M_GetIdeal).
+    // By setting additional_angle = modern_cam_angle - lara_rot_y,
+    // the orbit becomes: (modern_cam_angle - lara_rot_y) + lara_rot_y
+    //                  = modern_cam_angle (player-controlled, stable).
+    g_Camera.additional_angle =
+        g_Camera.modern_cam_angle - Lara_GetItem()->rot.y;
 }
 
 void Camera_Apply(void)

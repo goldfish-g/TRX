@@ -2,6 +2,7 @@
 #include <trx/game/camera.h>
 #include <trx/game/input.h>
 #include <trx/game/lara.h>
+#include <trx/game/lara/modern.h>
 #include <trx/game/lara/util.h>
 #include <trx/game/sound.h>
 #include <trx/version.h>
@@ -21,7 +22,36 @@ static void M_Compress(ITEM *const item, COLL_INFO *const coll)
 {
     LARA_INFO *const lara = Lara_GetLaraInfo();
     if (lara->water_status != LWS_WADE) {
-        if (g_Input.forward
+        const int32_t target32 = Lara_ModernGetTargetAngle();
+        if (target32 != MODERN_ANGLE_NONE) {
+            // Camera-relative jump direction from analog stick
+            const int16_t delta = (int16_t)target32 - item->rot.y;
+            const int16_t abs_delta = ABS(delta);
+            if (abs_delta < DEG_45
+                && Lara_FloorFront(item, item->rot.y, STEP_L)
+                    >= -STEPUP_HEIGHT) {
+                item->goal_anim_state = LS(LS_JUMP_FORWARD);
+                lara->move_angle = item->rot.y;
+            } else if (
+                abs_delta > DEG_135
+                && Lara_FloorFront(item, item->rot.y + DEG_180, STEP_L)
+                    >= -STEPUP_HEIGHT) {
+                item->goal_anim_state = LS(LS_JUMP_BACK);
+                lara->move_angle = item->rot.y + DEG_180;
+            } else if (
+                delta > 0
+                && Lara_FloorFront(item, item->rot.y + DEG_90, STEP_L)
+                    >= -STEPUP_HEIGHT) {
+                item->goal_anim_state = LS(LS_JUMP_RIGHT);
+                lara->move_angle = item->rot.y + DEG_90;
+            } else if (
+                delta < 0
+                && Lara_FloorFront(item, item->rot.y - DEG_90, STEP_L)
+                    >= -STEPUP_HEIGHT) {
+                item->goal_anim_state = LS(LS_JUMP_LEFT);
+                lara->move_angle = item->rot.y - DEG_90;
+            }
+        } else if (g_Input.forward
             && Lara_FloorFront(item, item->rot.y, STEP_L) >= -STEPUP_HEIGHT) {
             item->goal_anim_state = LS(LS_JUMP_FORWARD);
             lara->move_angle = item->rot.y;
@@ -108,12 +138,14 @@ static void M_ForwardJump(ITEM *const item, COLL_INFO *const coll)
         }
     }
 
-    if (g_Input.left) {
-        lara->turn_rate -= LARA_TURN_RATE;
-        CLAMPL(lara->turn_rate, -M_JUMP_TURN);
-    } else if (g_Input.right) {
-        lara->turn_rate += LARA_TURN_RATE;
-        CLAMPG(lara->turn_rate, +M_JUMP_TURN);
+    if (!Lara_ModernTurn(LARA_TURN_RATE, M_JUMP_TURN)) {
+        if (g_Input.left) {
+            lara->turn_rate -= LARA_TURN_RATE;
+            CLAMPL(lara->turn_rate, -M_JUMP_TURN);
+        } else if (g_Input.right) {
+            lara->turn_rate += LARA_TURN_RATE;
+            CLAMPG(lara->turn_rate, +M_JUMP_TURN);
+        }
     }
 }
 

@@ -1,3 +1,4 @@
+#include <trx/config.h>
 #include <trx/core/math.h>
 #include <trx/debug.h>
 #include <trx/game/camera.h>
@@ -465,8 +466,37 @@ static void M_Chase(const ITEM *const item)
         g_Camera.target = m_LastIdeal.target;
     }
 
-    GAME_VECTOR ideal = M_GetIdeal(distance, item->rot.y);
-    M_Collide(&ideal, M_CHASE_SHIFT, true);
+    GAME_VECTOR ideal;
+
+    if (g_Config.gameplay.enable_modern_controls) {
+        // Modern controls: keep the player's chosen angle and zoom in
+        // when blocked, rather than rotating to find a clear angle.
+        const int16_t angle =
+            g_Camera.target_angle + item->rot.y;
+        int32_t try_dist = distance;
+
+        // Try progressively shorter distances until LOS is clear
+        for (int32_t attempt = 0; attempt < 4; attempt++) {
+            ideal.x = g_Camera.target.x
+                - ((try_dist * Math_Sin(angle)) >> W2V_SHIFT);
+            ideal.y = ((Math_Sin(g_Camera.target_elevation)
+                        * g_Camera.target_distance)
+                       >> W2V_SHIFT)
+                + g_Camera.target.y;
+            ideal.z = g_Camera.target.z
+                - ((try_dist * Math_Cos(angle)) >> W2V_SHIFT);
+            ideal.room_num = g_Camera.target.room_num;
+
+            if (M_LOS(&g_Camera.target, &ideal, 200)) {
+                break;
+            }
+            try_dist = try_dist * 3 / 4; // shrink by 25% each attempt
+        }
+        M_Collide(&ideal, M_CHASE_SHIFT, true);
+    } else {
+        ideal = M_GetIdeal(distance, item->rot.y);
+        M_Collide(&ideal, M_CHASE_SHIFT, true);
+    }
 
     if (m_LastState.cam_type == CAM_FIXED) {
         g_Camera.speed = 1;

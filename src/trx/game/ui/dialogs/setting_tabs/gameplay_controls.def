@@ -19,6 +19,7 @@ X_UI_CFG(gameplay.enable_toggle_crouch,     .custom_handler = { .is_available = 
 X_UI_CFG(gameplay.enable_sprint)
 X_UI_CFG(gameplay.enable_responsive_sprint, .custom_handler = { .is_available = UI_Settings_Sprint_IsAvailable })
 X_UI_CFG(gameplay.enable_toggle_sprint,     .custom_handler = { .is_available = UI_Settings_Sprint_IsAvailable })
+X_UI_CFG(gameplay.enable_modern_controls)
 X_UI_CFG(gameplay.enable_neutral_twists)
 X_UI_CFG(gameplay.enable_slide_to_run)
 X_UI_CFG(gameplay.enable_back_slope_stumble)

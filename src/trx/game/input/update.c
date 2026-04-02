@@ -1,6 +1,7 @@
 #include <trx/config.h>
 #include <trx/game/camera.h>
 #include <trx/game/game_strings/entries.h>
+#include <trx/game/input/analog.h>
 #include <trx/game/input/backends/base.h>
 #include <trx/game/input/backends/controller.h>
 #include <trx/game/input/backends/keyboard.h>
@@ -8,6 +9,8 @@
 #include <trx/game/input/common.h>
 #include <trx/game/lara.h>
 #include <trx/version.h>
+
+#include <SDL2/SDL.h>
 
 static void M_UpdateFromBackend(
     INPUT_STATE *const s, const INPUT_BACKEND_IMPL *const backend,
@@ -19,8 +22,20 @@ static void M_UpdateFromBackend(
     backend->custom_update(s, layout);
 }
 
+static bool m_LastModernState = false;
+
 void Input_Update(void)
 {
+    // Detect control scheme changes and swap layout banks
+    if (g_Config.gameplay.enable_modern_controls != m_LastModernState) {
+        m_LastModernState = g_Config.gameplay.enable_modern_controls;
+        Input_Keyboard_SetScheme(m_LastModernState);
+        Input_Controller_SetScheme(m_LastModernState);
+        if (!m_LastModernState) {
+            SDL_SetRelativeMouseMode(SDL_FALSE);
+        }
+    }
+
     InputState_Clear(&g_Input);
 
     M_UpdateFromBackend(
@@ -31,6 +46,9 @@ void Input_Update(void)
         g_Config.input.layout[INPUT_BACKEND_CONTROLLER]);
     M_UpdateFromBackend(
         &g_Input, &g_Input_Touch, g_Config.input.layout[INPUT_BACKEND_TOUCH]);
+
+    Analog_Update();
+    Analog_UpdateCamera();
 
     // Suppress roles whose bindings are subsets of longer active combos.
     g_Input_Keyboard.resolve_combos(

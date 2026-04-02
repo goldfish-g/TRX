@@ -10,6 +10,7 @@
 #include <trx/game/lara.h>
 #include <trx/game/lara/breath.h>
 #include <trx/game/lara/electric.h>
+#include <trx/game/lara/modern.h>
 #include <trx/game/level/settings.h>
 #include <trx/game/music.h>
 #include <trx/game/output.h>
@@ -670,6 +671,7 @@ static void M_HandleAboveWater(COLL_INFO *const coll)
     }
 
     lara_info->is_crouched = false;
+    Lara_ModernRemapInput();
     Lara_State_Update(item, coll);
 
     M_UndoRot(&item->rot.x, LARA_LEAN_UNDO);
@@ -1040,7 +1042,11 @@ void Lara_Control(void)
         lara_info->death_timer = 9 * LOGIC_FPS;
     }
 
-    Camera_MoveManual();
+    if (g_Config.gameplay.enable_modern_controls) {
+        Camera_MoveModern();
+    } else {
+        Camera_MoveManual();
+    }
     M_HandleEnvironment();
     Lara_Breath_Control(item);
 

@@ -26,6 +26,8 @@ typedef struct {
 } KEYBOARD_ROLE_BINDING;
 
 static bool m_KeyboardState[SDL_NUM_SCANCODES] = {};
+static int32_t m_MouseDeltaX = 0;
+static int32_t m_MouseDeltaY = 0;
 static bool m_Conflicts[INPUT_LAYOUT_NUMBER_OF][INPUT_ROLE_NUMBER_OF] = {};
 
 static const BUILTIN_KEYBOARD_LAYOUT m_BuiltinLayoutBase[] = {
@@ -36,10 +38,25 @@ static const BUILTIN_KEYBOARD_LAYOUT m_BuiltinLayoutBase[] = {
     // clang-format on
 };
 
+#undef INPUT_KEYBOARD_ASSIGN
+static BUILTIN_KEYBOARD_LAYOUT m_ModernBuiltinLayout[] = {
+// clang-format off
+#define INPUT_KEYBOARD_ASSIGN(role, key) { role, key },
+#include <trx/game/input/backends/keyboard_modern.def>
+    { -1, SDL_SCANCODE_UNKNOWN },
+    // clang-format on
+};
+
 static BUILTIN_KEYBOARD_LAYOUT m_BuiltinLayout[ARRAY_SIZE(m_BuiltinLayoutBase)];
 
 static KEYBOARD_ROLE_BINDING m_Layout[INPUT_LAYOUT_NUMBER_OF]
                                      [INPUT_ROLE_NUMBER_OF];
+
+// Bank storage for dual control schemes
+static KEYBOARD_ROLE_BINDING
+    m_ClassicBank[INPUT_LAYOUT_NUMBER_OF][INPUT_ROLE_NUMBER_OF];
+static KEYBOARD_ROLE_BINDING
+    m_ModernBank[INPUT_LAYOUT_NUMBER_OF][INPUT_ROLE_NUMBER_OF];
 
 // Update internal controller button/axis state from SDL events.
 // @param event     Event to process.
@@ -53,6 +70,10 @@ static void M_ProcessEvent(const SDL_Event *const event)
         break;
     case SDL_KEYUP:
         m_KeyboardState[event->key.keysym.scancode] = false;
+        break;
+    case SDL_MOUSEMOTION:
+        m_MouseDeltaX += event->motion.xrel;
+        m_MouseDeltaY += event->motion.yrel;
         break;
     default:
         break;
@@ -477,6 +498,33 @@ static void M_HandleBuiltInDefaults(void)
 #undef L_BIND
 }
 
+static void M_LoadBuiltin(
+    KEYBOARD_ROLE_BINDING target[][INPUT_ROLE_NUMBER_OF],
+    const BUILTIN_KEYBOARD_LAYOUT *const builtin_array)
+{
+    for (INPUT_ROLE role = 0; role < INPUT_ROLE_NUMBER_OF; role++) {
+        for (int32_t slot = 0; slot < INPUT_BINDING_SLOTS; slot++) {
+            target[INPUT_LAYOUT_DEFAULT][role].slots[slot] =
+                (KEYBOARD_BINDING) { .key_count = 0 };
+        }
+    }
+    for (int32_t i = 0; builtin_array[i].role != (INPUT_ROLE)-1; i++) {
+        const BUILTIN_KEYBOARD_LAYOUT *const builtin = &builtin_array[i];
+        target[INPUT_LAYOUT_DEFAULT][builtin->role].slots[0] =
+            (KEYBOARD_BINDING) {
+                .key_count =
+                    builtin->scancode != SDL_SCANCODE_UNKNOWN ? 1 : 0,
+                .keys = { builtin->scancode },
+            };
+    }
+    for (int32_t layout = INPUT_LAYOUT_CUSTOM_1;
+         layout < INPUT_LAYOUT_NUMBER_OF; layout++) {
+        for (INPUT_ROLE role = 0; role < INPUT_ROLE_NUMBER_OF; role++) {
+            target[layout][role] = target[INPUT_LAYOUT_DEFAULT][role];
+        }
+    }
+}
+
 static void M_Init(void)
 {
     memcpy(m_BuiltinLayout, m_BuiltinLayoutBase, sizeof(m_BuiltinLayout));
@@ -505,6 +553,10 @@ static void M_Init(void)
          layout < INPUT_LAYOUT_NUMBER_OF; layout++) {
         M_ResetLayout(layout);
     }
+
+    // Initialize both layout banks
+    memcpy(m_ClassicBank, m_Layout, sizeof(m_Layout));
+    M_LoadBuiltin(m_ModernBank, m_ModernBuiltinLayout);
 }
 
 static bool M_CustomUpdate(INPUT_STATE *const result, const INPUT_LAYOUT layout)
@@ -888,6 +940,28 @@ static bool M_ReadAndAssign(
         return true;
     }
     return false;
+}
+
+void Input_Keyboard_SetScheme(const bool modern)
+{
+    if (modern) {
+        memcpy(m_ClassicBank, m_Layout, sizeof(m_Layout));
+        memcpy(m_Layout, m_ModernBank, sizeof(m_Layout));
+    } else {
+        memcpy(m_ModernBank, m_Layout, sizeof(m_Layout));
+        memcpy(m_Layout, m_ClassicBank, sizeof(m_Layout));
+    }
+    for (int32_t layout = 0; layout < INPUT_LAYOUT_NUMBER_OF; layout++) {
+        M_CheckConflicts(layout);
+    }
+}
+
+void Input_Keyboard_GetMouseDelta(int32_t *const dx, int32_t *const dy)
+{
+    *dx = m_MouseDeltaX;
+    *dy = m_MouseDeltaY;
+    m_MouseDeltaX = 0;
+    m_MouseDeltaY = 0;
 }
 
 INPUT_BACKEND_IMPL g_Input_Keyboard = {

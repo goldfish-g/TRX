@@ -2,6 +2,7 @@
 #include <trx/game/camera.h>
 #include <trx/game/input.h>
 #include <trx/game/lara.h>
+#include <trx/game/lara/modern.h>
 #include <trx/game/lara/util.h>
 
 // clang-format off
@@ -21,23 +22,27 @@ static void M_SwimTurn(ITEM *const item)
     }
 
     if (g_Config.gameplay.enable_tr2_swimming) {
-        LARA_INFO *const lara = Lara_GetLaraInfo();
-        if (g_Input.left) {
-            lara->turn_rate -= LARA_TURN_RATE;
-            CLAMPL(lara->turn_rate, -LARA_MED_TURN);
-            item->rot.z -= M_LEAN_RATE;
-        } else if (g_Input.right) {
-            lara->turn_rate += LARA_TURN_RATE;
-            CLAMPG(lara->turn_rate, LARA_MED_TURN);
-            item->rot.z += M_LEAN_RATE;
+        if (!Lara_ModernTurn(LARA_TURN_RATE, LARA_MED_TURN)) {
+            LARA_INFO *const lara = Lara_GetLaraInfo();
+            if (g_Input.left) {
+                lara->turn_rate -= LARA_TURN_RATE;
+                CLAMPL(lara->turn_rate, -LARA_MED_TURN);
+                item->rot.z -= M_LEAN_RATE;
+            } else if (g_Input.right) {
+                lara->turn_rate += LARA_TURN_RATE;
+                CLAMPG(lara->turn_rate, LARA_MED_TURN);
+                item->rot.z += M_LEAN_RATE;
+            }
         }
     } else {
-        if (g_Input.left) {
-            item->rot.y -= LARA_MED_TURN;
-            item->rot.z -= M_LEAN_RATE;
-        } else if (g_Input.right) {
-            item->rot.y += LARA_MED_TURN;
-            item->rot.z += M_LEAN_RATE;
+        if (!Lara_ModernTurn(LARA_TURN_RATE, LARA_MED_TURN)) {
+            if (g_Input.left) {
+                item->rot.y -= LARA_MED_TURN;
+                item->rot.z -= M_LEAN_RATE;
+            } else if (g_Input.right) {
+                item->rot.y += LARA_MED_TURN;
+                item->rot.z += M_LEAN_RATE;
+            }
         }
     }
 }
@@ -150,10 +155,22 @@ static void M_TreadSurface(ITEM *const item, COLL_INFO *const coll)
         return;
     }
 
-    if (g_Input.left) {
-        item->rot.y -= LARA_SLOW_TURN;
-    } else if (g_Input.right) {
-        item->rot.y += LARA_SLOW_TURN;
+    const int32_t surf_target = Lara_ModernGetTargetAngle();
+    if (surf_target != MODERN_ANGLE_NONE) {
+        const int16_t surf_delta = (int16_t)surf_target - item->rot.y;
+        if (surf_delta > LARA_SLOW_TURN) {
+            item->rot.y += LARA_SLOW_TURN;
+        } else if (surf_delta < -LARA_SLOW_TURN) {
+            item->rot.y -= LARA_SLOW_TURN;
+        } else {
+            item->rot.y += surf_delta;
+        }
+    } else {
+        if (g_Input.left) {
+            item->rot.y -= LARA_SLOW_TURN;
+        } else if (g_Input.right) {
+            item->rot.y += LARA_SLOW_TURN;
+        }
     }
 
     if (g_Input.forward) {
@@ -195,10 +212,24 @@ static void M_ForwardSurface(ITEM *const item, COLL_INFO *const coll)
 
     LARA_INFO *const lara = Lara_GetLaraInfo();
     lara->dive_timer = 0;
-    if (g_Input.left) {
-        item->rot.y -= LARA_SLOW_TURN;
-    } else if (g_Input.right) {
-        item->rot.y += LARA_SLOW_TURN;
+    {
+        const int32_t fwd_target = Lara_ModernGetTargetAngle();
+        if (fwd_target != MODERN_ANGLE_NONE) {
+            const int16_t fwd_delta = (int16_t)fwd_target - item->rot.y;
+            if (fwd_delta > LARA_SLOW_TURN) {
+                item->rot.y += LARA_SLOW_TURN;
+            } else if (fwd_delta < -LARA_SLOW_TURN) {
+                item->rot.y -= LARA_SLOW_TURN;
+            } else {
+                item->rot.y += fwd_delta;
+            }
+        } else {
+            if (g_Input.left) {
+                item->rot.y -= LARA_SLOW_TURN;
+            } else if (g_Input.right) {
+                item->rot.y += LARA_SLOW_TURN;
+            }
+        }
     }
     if (!g_Input.forward || g_Input.jump) {
         item->goal_anim_state = LS(LS_SURF_TREAD);
@@ -219,10 +250,24 @@ static void M_SideBackSurface(ITEM *const item, COLL_INFO *const coll)
     LARA_INFO *const lara = Lara_GetLaraInfo();
     lara->dive_timer = 0;
 
-    if (g_Input.left) {
-        item->rot.y -= M_TURN_RATE;
-    } else if (g_Input.right) {
-        item->rot.y += M_TURN_RATE;
+    {
+        const int32_t sb_target = Lara_ModernGetTargetAngle();
+        if (sb_target != MODERN_ANGLE_NONE) {
+            const int16_t sb_delta = (int16_t)sb_target - item->rot.y;
+            if (sb_delta > M_TURN_RATE) {
+                item->rot.y += M_TURN_RATE;
+            } else if (sb_delta < -M_TURN_RATE) {
+                item->rot.y -= M_TURN_RATE;
+            } else {
+                item->rot.y += sb_delta;
+            }
+        } else {
+            if (g_Input.left) {
+                item->rot.y -= M_TURN_RATE;
+            } else if (g_Input.right) {
+                item->rot.y += M_TURN_RATE;
+            }
+        }
     }
 
     bool stop = false;
