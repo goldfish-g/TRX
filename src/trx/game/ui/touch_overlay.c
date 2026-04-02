@@ -58,22 +58,22 @@ typedef struct {
 // clang-format off
 static const TOUCH_BUTTON_DEF m_ButtonDefs[] = {
     // D-pad
-    { .role = INPUT_ROLE_UP,          .anchor = ANCHOR_BOTTOM_LEFT,  .offset_x = 0.15f, .offset_y = 0.20f, .radius = 0.11f, .engine_mask = 0x7, .is_dpad = true },
+    { .role = INPUT_ROLE_UP,          .anchor = ANCHOR_BOTTOM_LEFT,  .offset_x = 0.15f, .offset_y = 0.13f, .radius = 0.11f, .engine_mask = 0x7, .is_dpad = true },
 
     // Main action buttons
-    { .role = INPUT_ROLE_JUMP,        .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.10f, .offset_y = 0.20f, .radius = 0.065f, .engine_mask = 0x7 },
-    { .role = INPUT_ROLE_ACTION,      .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.165f, .offset_y = 0.315f, .radius = 0.065f, .engine_mask = 0x7 },
+    { .role = INPUT_ROLE_JUMP,        .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.10f, .offset_y = 0.10f, .radius = 0.065f, .engine_mask = 0x7 },
+    { .role = INPUT_ROLE_ACTION,      .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.21f, .offset_y = 0.21f, .radius = 0.065f, .engine_mask = 0x7 },
 
     // Orbit buttons around ACTION
-    { .role = INPUT_ROLE_SLOW,        .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.275f, .offset_y = 0.315f, .radius = 0.035f, .engine_mask = 0x7 },
-    { .role = INPUT_ROLE_LOOK,        .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.243f, .offset_y = 0.237f, .radius = 0.035f, .engine_mask = 0x7 },
-    { .role = INPUT_ROLE_ROLL,        .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.165f, .offset_y = 0.205f, .radius = 0.035f, .engine_mask = 0x7 },
-    { .role = INPUT_ROLE_DRAW_WEAPON, .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.055f, .offset_y = 0.315f, .radius = 0.035f, .engine_mask = 0x3 },
+    { .role = INPUT_ROLE_SLOW,        .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.32f, .offset_y = 0.21f, .radius = 0.035f, .engine_mask = 0x7 },
+    { .role = INPUT_ROLE_LOOK,        .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.29f, .offset_y = 0.13f, .radius = 0.035f, .engine_mask = 0x7 },
+    { .role = INPUT_ROLE_ROLL,        .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.21f, .offset_y = 0.10f, .radius = 0.035f, .engine_mask = 0x7 },
+    { .role = INPUT_ROLE_DRAW_WEAPON, .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.10f, .offset_y = 0.21f, .radius = 0.035f, .engine_mask = 0x3 },
     // TR3: sprint/crouch replace draw_weapon position
-    { .role = INPUT_ROLE_SPRINT,      .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.055f, .offset_y = 0.315f, .radius = 0.035f, .engine_mask = 0x4 },
-    { .role = INPUT_ROLE_CROUCH,      .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.087f, .offset_y = 0.393f, .radius = 0.035f, .engine_mask = 0x4 },
+    { .role = INPUT_ROLE_SPRINT,      .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.10f, .offset_y = 0.21f, .radius = 0.035f, .engine_mask = 0x4 },
+    { .role = INPUT_ROLE_CROUCH,      .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.13f, .offset_y = 0.29f, .radius = 0.035f, .engine_mask = 0x4 },
     // TR3: draw_weapon moves to different position
-    { .role = INPUT_ROLE_DRAW_WEAPON, .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.087f, .offset_y = 0.237f, .radius = 0.035f, .engine_mask = 0x4 },
+    { .role = INPUT_ROLE_DRAW_WEAPON, .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.13f, .offset_y = 0.13f, .radius = 0.035f, .engine_mask = 0x4 },
 
     // Top bar
     { .role = INPUT_ROLE_INVENTORY,   .anchor = ANCHOR_TOP_CENTER,   .offset_x = -0.08f, .offset_y = 0.04f, .radius = 0.03f, .engine_mask = 0x7 },
