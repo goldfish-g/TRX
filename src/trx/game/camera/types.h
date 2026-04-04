@@ -52,6 +52,8 @@ typedef struct {
 
     // decoupled camera yaw for modern controls (player-controlled only)
     int16_t modern_cam_angle;
+    int16_t modern_roll_target; // target angle for 180° arc sweep
+    bool modern_roll_active; // true while sweeping toward roll_target
     GAME_VECTOR mic_pos;
 
     struct {

@@ -9,6 +9,7 @@
 #include <trx/game/input/analog.h>
 #include <trx/game/input/backends/keyboard.h>
 #include <trx/game/lara.h>
+#include <trx/game/lara/modern.h>
 #include <trx/game/matrix.h>
 #include <trx/game/random.h>
 #include <trx/game/rooms.h>
@@ -27,7 +28,7 @@ static const double m_ManualCameraMultiplier[11] = {
 static bool m_IsChunky = false;
 static bool m_LastInputWasMouse = false;
 
-#define M_MODERN_CAM_CREEP DEG_1 // 1 deg/frame = ~3 sec for 90 deg
+#define M_ROLL_ARC_PULL 40 // % to reduce distance at arc midpoint
 static bool m_IsInitialised = false;
 
 static void M_OffsetAdditionalAngle(const int16_t delta)
@@ -102,6 +103,7 @@ void Camera_ResetPosition(void)
     g_Camera.additional_angle = 0;
     g_Camera.additional_elevation = 0;
     g_Camera.modern_cam_angle = Lara_GetItem()->rot.y;
+    g_Camera.modern_roll_active = false;
     const LARA_INFO *const lara_info = Lara_GetLaraInfo();
     if (!lara_info->extra_anim) {
         g_Camera.type = CAM_CHASE;
@@ -354,6 +356,7 @@ void Camera_MoveModern(void)
         g_Camera.modern_cam_angle = Lara_GetItem()->rot.y;
         g_Camera.additional_angle = 0;
         g_Camera.additional_elevation = 0;
+        g_Camera.modern_roll_active = false;
         return;
     }
 
@@ -390,25 +393,66 @@ void Camera_MoveModern(void)
         g_Camera.additional_elevation = (int16_t)new_elev;
     }
 
-    // Camera creep: slowly drift behind Lara when she is actually moving,
-    // not just when the stick is pressed. This prevents the camera from
-    // rotating while Lara is still turning to face the target direction.
-    // Only for controller (not mouse).
+    // Roll arc: proportionally sweep modern_cam_angle toward a target
+    // set by M_Turn180. Closes 1/6th of the remaining gap each frame
+    // (ease-out: fast start, smooth finish). Camera distance is reduced
+    // at the midpoint for a shallower arc path. Speed=1 + target_angle
+    // sync ensure the chase camera tracks the arc exactly on each frame.
+    if (g_Camera.modern_roll_active) {
+        const int16_t delta =
+            g_Camera.modern_roll_target - g_Camera.modern_cam_angle;
+        if (ABS(delta) < DEG_1) {
+            g_Camera.modern_cam_angle = g_Camera.modern_roll_target;
+            g_Camera.modern_roll_active = false;
+        } else {
+            int16_t step = delta / 6;
+            if (step == 0) {
+                step = (delta > 0) ? 1 : -1;
+            }
+            g_Camera.modern_cam_angle += step;
+
+            // Triangle distance profile: pull camera closer at midpoint.
+            // Approximate progress as 0..1 using remaining delta vs 180°.
+            const int32_t abs_delta = ABS(delta);
+            const int32_t half = (int32_t)DEG_90;
+            int32_t pull;
+            if (abs_delta > half) {
+                pull = (int32_t)DEG_180 - abs_delta; // 0 → DEG_90
+            } else {
+                pull = abs_delta; // DEG_90 → 0
+            }
+            g_Camera.target_distance = CAMERA_DEFAULT_DISTANCE
+                - CAMERA_DEFAULT_DISTANCE * M_ROLL_ARC_PULL / 100 * pull
+                    / half;
+        }
+        g_Camera.speed = 1;
+        g_Camera.target_angle =
+            g_Camera.modern_cam_angle - Lara_GetItem()->rot.y;
+    }
+
+    // Camera creep: drift toward Lara's facing direction.
+    // When stick is off-axis (target != camera forward), use stronger
+    // proportional creep so the camera follows even after Lara has
+    // finished turning. turn_rate component gives responsive following
+    // during active turns.
     if (Lara_GetItem()->speed > 0 && !m_LastInputWasMouse
         && g_AnalogCamInput.stick_x == 0 && g_AnalogCamInput.stick_y == 0) {
-        const int16_t lara_y = Lara_GetItem()->rot.y;
-        const int16_t cam_delta = lara_y - g_Camera.modern_cam_angle;
-        if (cam_delta > 0) {
-            g_Camera.modern_cam_angle += M_MODERN_CAM_CREEP;
-            if ((int16_t)(lara_y - g_Camera.modern_cam_angle) < 0) {
-                g_Camera.modern_cam_angle = lara_y;
-            }
-        } else if (cam_delta < 0) {
-            g_Camera.modern_cam_angle -= M_MODERN_CAM_CREEP;
-            if ((int16_t)(lara_y - g_Camera.modern_cam_angle) > 0) {
-                g_Camera.modern_cam_angle = lara_y;
-            }
+        const LARA_INFO *const lara = Lara_GetLaraInfo();
+        const int16_t cam_delta =
+            Lara_GetItem()->rot.y - g_Camera.modern_cam_angle;
+        int16_t step = lara->turn_rate / 3;
+
+        const int32_t target32 = Lara_ModernGetTargetAngle();
+        if (target32 != MODERN_ANGLE_NONE) {
+            // Stick active and off-axis: stronger proportional creep.
+            // Pure proportional — no hard cap, so there's no flat-rate
+            // region that would feel jerky.
+            step += cam_delta / 10;
+        } else {
+            // No stick input: gentle convergence only
+            step += cam_delta / 192;
         }
+        g_Camera.modern_cam_angle += step;
     }
 
     // Decouple chase camera orbit from Lara's rotation.

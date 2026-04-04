@@ -168,6 +168,7 @@ static void M_Run(ITEM *const item, COLL_INFO *const coll)
         item->current_anim_state = LS(LS_ROLL);
         item->goal_anim_state = LS(LS_STOP);
         Item_SwitchToAnim(item, LA(LA_ROLL_START), M_LF_ROLL);
+
         return;
     }
 
@@ -393,7 +394,26 @@ static void M_Stop(ITEM *const item, COLL_INFO *const coll)
         } else if (g_Input.right) {
             item->goal_anim_state = LS(LS_TURN_RIGHT);
         }
-    } else if (g_Input.step_left) {
+    }
+
+    // Modern controls: from standstill, fully turn to target before running.
+    // Without this, Lara starts running while still facing the wrong way.
+    if (g_Config.gameplay.enable_modern_controls && g_Input.forward) {
+        const int32_t target32 = Lara_ModernGetTargetAngle();
+        if (target32 != MODERN_ANGLE_NONE) {
+            const int16_t delta = (int16_t)target32 - item->rot.y;
+            if (ABS(delta) >= MODERN_STRAIGHT_ZONE) {
+                if (delta > 0) {
+                    item->goal_anim_state = LS(LS_TURN_RIGHT);
+                } else {
+                    item->goal_anim_state = LS(LS_TURN_LEFT);
+                }
+                return;
+            }
+        }
+    }
+
+    if (g_Input.step_left) {
         const int32_t h = Lara_FloorFront(item, item->rot.y - DEG_90, 148);
         const int32_t c =
             Lara_CeilingFront(item, item->rot.y - DEG_90, 148, LARA_HEIGHT);
@@ -497,6 +517,7 @@ static void M_Pose(ITEM *const item, COLL_INFO *const coll)
     bool cancel_camera = false;
     if (g_Input.roll && !g_Input.jump) {
         item->goal_anim_state = LS(LS_ROLL);
+
         cancel_camera = true;
     } else if (item->current_anim_state == LS(LS_POSE)) {
         LARA_INFO *const lara = Lara_GetLaraInfo();
@@ -559,8 +580,8 @@ static void M_Turn(ITEM *const item, COLL_INFO *const coll)
         const int32_t target32 = Lara_ModernGetTargetAngle();
         if (target32 != MODERN_ANGLE_NONE) {
             const int16_t delta = (int16_t)target32 - item->rot.y;
-            if (ABS(delta) < MODERN_FORWARD_ZONE) {
-                // Aligned — transition to movement
+            if (ABS(delta) < MODERN_STRAIGHT_ZONE) {
+                // Fully aligned — transition to movement
                 if (lara->water_status == LWS_WADE) {
                     item->goal_anim_state = LS(LS_WADE);
                 } else if (g_Input.slow) {
@@ -630,7 +651,7 @@ static void M_FastTurn(ITEM *const item, COLL_INFO *const coll)
         const int32_t target32 = Lara_ModernGetTargetAngle();
         if (target32 != MODERN_ANGLE_NONE) {
             const int16_t delta = (int16_t)target32 - item->rot.y;
-            if (ABS(delta) < MODERN_FORWARD_ZONE) {
+            if (ABS(delta) < MODERN_STRAIGHT_ZONE) {
                 item->goal_anim_state = LS(LS_RUN);
             }
         }

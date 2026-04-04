@@ -104,6 +104,7 @@ static void M_NeutralJumpRoll(ITEM *const item, COLL_INFO *const coll)
         item->goal_anim_state = LS(LS_COMPRESS);
     } else if (g_Input.roll) {
         item->goal_anim_state = LS(LS_ROLL);
+
     } else {
         if (Item_TestFrameEqual(item, M_LF_NEUTRAL_TWIST_WADE_SPLASH)) {
             Lara_Col_WadeSplash(item);
@@ -127,7 +128,12 @@ static void M_ForwardJump(ITEM *const item, COLL_INFO *const coll)
             item->goal_anim_state = LS(LS_REACH);
         }
         if (g_Config.gameplay.enable_jump_twists
-            && (g_Input.roll || g_Input.back)) {
+            && (g_Input.roll
+                || (!g_Config.gameplay.enable_modern_controls
+                    && g_Input.back))) {
+            // With modern controls, g_Input.back comes from raw stick
+            // conversion (non-remappable state) and doesn't reflect the
+            // player's camera-relative intent — skip it.
             item->goal_anim_state = LS(LS_TWIST);
         }
         if (g_Input.slow && lara->gun_status == LGS_ARMLESS) {
@@ -163,8 +169,13 @@ static void M_BackJump(ITEM *const item, COLL_INFO *const coll)
         item->goal_anim_state = LS(LS_STOP);
     } else if (
         g_Config.gameplay.enable_jump_twists
-        && (g_Input.forward || g_Input.roll)
+        && (g_Input.roll
+            || (!g_Config.gameplay.enable_modern_controls && g_Input.forward))
         && item->goal_anim_state != LS(LS_STOP)) {
+        // With modern controls, g_Input.forward comes from raw stick
+        // conversion (non-remappable state) and doesn't reflect the
+        // player's camera-relative intent — skip it. Roll button still
+        // triggers twists intentionally.
         item->goal_anim_state = LS(LS_TWIST);
     }
 }
@@ -201,7 +212,9 @@ static void M_FallBack(ITEM *const item, COLL_INFO *const coll)
 
 static void M_Reach(ITEM *const item, COLL_INFO *const coll)
 {
-    g_Camera.target_angle = M_CAM_REACH_ANGLE;
+    if (!g_Config.gameplay.enable_modern_controls) {
+        g_Camera.target_angle = M_CAM_REACH_ANGLE;
+    }
     if (item->fall_speed > M_FAST_FALL_SPEED) {
         item->goal_anim_state = LS(LS_FAST_FALL);
     }

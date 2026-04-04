@@ -587,7 +587,11 @@ static void M_Chase(const ITEM *const item)
         // Modern controls: keep the player's chosen angle. If a wall
         // blocks the ideal position, LOS_Check clips to the exact wall
         // point — giving smooth continuous zoom instead of discrete steps.
-        if (speed > 4) {
+        // During roll sweeps, use the override speed (1) so the camera
+        // tracks the arc exactly instead of cutting through Lara.
+        if (g_Camera.modern_roll_active) {
+            speed = g_Camera.speed;
+        } else if (speed > 4) {
             speed = 4;
         }
         LOS_Check(&g_Camera.target, &target, false);

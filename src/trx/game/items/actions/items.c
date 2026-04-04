@@ -1,3 +1,5 @@
+#include <trx/config.h>
+#include <trx/game/camera.h>
 #include <trx/game/lara.h>
 
 static void M_Turn180(ITEM *const item)
@@ -8,10 +10,17 @@ static void M_Turn180(ITEM *const item)
 
     item->rot.x = -item->rot.x;
     item->rot.y += DEG_180;
-    if (item == Lara_GetItem()
-        && item->current_anim_state != LS(LS_ROLL_CONT)) {
-        LARA_INFO *const lara = Lara_GetLaraInfo();
-        lara->move_angle += DEG_180;
+    if (item == Lara_GetItem()) {
+        if (item->current_anim_state != LS(LS_ROLL_CONT)) {
+            LARA_INFO *const lara = Lara_GetLaraInfo();
+            lara->move_angle += DEG_180;
+        }
+        // Sweep camera around Lara in a shallow arc during the roll.
+        if (g_Config.gameplay.enable_modern_controls) {
+            g_Camera.modern_roll_target =
+                g_Camera.modern_cam_angle + (int16_t)DEG_180;
+            g_Camera.modern_roll_active = true;
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 #include <trx/config.h>
 #include <trx/game/input.h>
+#include <trx/game/input/analog.h>
 #include <trx/game/lara.h>
 #include <trx/game/lara/util.h>
 #include <trx/game/rooms.h>
@@ -406,14 +407,22 @@ static void M_ForwardJump(ITEM *const item, COLL_INFO *const coll)
     }
 
     switch (Lara_Col_LandedBad(item)) {
-    case LANDED_OK:
-        if (lara->water_status != LWS_WADE && g_Input.forward
-            && !g_Input.slow) {
+    case LANDED_OK: {
+        // With modern controls, jump states use raw stick-to-digital
+        // mapping, so g_Input.forward won't be set when running toward
+        // the camera. Use analog stick magnitude instead.
+        bool wants_run = g_Input.forward;
+        if (g_Config.gameplay.enable_modern_controls
+            && g_AnalogInput.magnitude > 0) {
+            wants_run = true;
+        }
+        if (lara->water_status != LWS_WADE && wants_run && !g_Input.slow) {
             item->goal_anim_state = LS(LS_RUN);
         } else {
             item->goal_anim_state = LS(LS_STOP);
         }
         break;
+    }
     case LANDED_BAD:
         item->goal_anim_state = LS(LS_DEATH);
         break;

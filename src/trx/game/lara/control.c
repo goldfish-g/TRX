@@ -713,6 +713,7 @@ static void M_HandleUnderwater(COLL_INFO *const coll)
     coll->enable_baddie_push = 1;
 
     Lara_Look_Update();
+    Lara_ModernRemapInput();
     Lara_State_Update(item, coll);
 
     if (item->rot.z > M_LEAN_UNDO_UW) {

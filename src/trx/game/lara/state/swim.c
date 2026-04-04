@@ -165,24 +165,26 @@ static void M_TreadSurface(ITEM *const item, COLL_INFO *const coll)
         } else {
             item->rot.y += surf_delta;
         }
+        // Camera-relative: any stick input means swim forward
+        item->goal_anim_state = LS(LS_SURF_SWIM);
     } else {
         if (g_Input.left) {
             item->rot.y -= LARA_SLOW_TURN;
         } else if (g_Input.right) {
             item->rot.y += LARA_SLOW_TURN;
         }
-    }
 
-    if (g_Input.forward) {
-        item->goal_anim_state = LS(LS_SURF_SWIM);
-    } else if (g_Input.back) {
-        item->goal_anim_state = LS(LS_SURF_BACK);
-    }
+        if (g_Input.forward) {
+            item->goal_anim_state = LS(LS_SURF_SWIM);
+        } else if (g_Input.back) {
+            item->goal_anim_state = LS(LS_SURF_BACK);
+        }
 
-    if (g_Input.step_left) {
-        item->goal_anim_state = LS(LS_SURF_LEFT);
-    } else if (g_Input.step_right) {
-        item->goal_anim_state = LS(LS_SURF_RIGHT);
+        if (g_Input.step_left) {
+            item->goal_anim_state = LS(LS_SURF_LEFT);
+        } else if (g_Input.step_right) {
+            item->goal_anim_state = LS(LS_SURF_RIGHT);
+        }
     }
 
     LARA_INFO *const lara = Lara_GetLaraInfo();
@@ -223,16 +225,20 @@ static void M_ForwardSurface(ITEM *const item, COLL_INFO *const coll)
             } else {
                 item->rot.y += fwd_delta;
             }
+            // Camera-relative: keep swimming while stick is active
+            if (g_Input.jump) {
+                item->goal_anim_state = LS(LS_SURF_TREAD);
+            }
         } else {
             if (g_Input.left) {
                 item->rot.y -= LARA_SLOW_TURN;
             } else if (g_Input.right) {
                 item->rot.y += LARA_SLOW_TURN;
             }
+            if (!g_Input.forward || g_Input.jump) {
+                item->goal_anim_state = LS(LS_SURF_TREAD);
+            }
         }
-    }
-    if (!g_Input.forward || g_Input.jump) {
-        item->goal_anim_state = LS(LS_SURF_TREAD);
     }
     item->fall_speed += 8;
     CLAMPG(item->fall_speed, M_MAX_SURF_SPEED);
@@ -261,32 +267,34 @@ static void M_SideBackSurface(ITEM *const item, COLL_INFO *const coll)
             } else {
                 item->rot.y += sb_delta;
             }
+            // Camera-relative: exit to tread (which will start forward swim)
+            item->goal_anim_state = LS(LS_SURF_TREAD);
         } else {
             if (g_Input.left) {
                 item->rot.y -= M_TURN_RATE;
             } else if (g_Input.right) {
                 item->rot.y += M_TURN_RATE;
             }
+
+            bool stop = false;
+            switch (LS_U(item->current_anim_state)) {
+            case LS_SURF_BACK:
+                stop = !g_Input.back;
+                break;
+            case LS_SURF_LEFT:
+                stop = !g_Input.step_left;
+                break;
+            case LS_SURF_RIGHT:
+                stop = !g_Input.step_right;
+                break;
+            default:
+                break;
+            }
+
+            if (stop) {
+                item->goal_anim_state = LS(LS_SURF_TREAD);
+            }
         }
-    }
-
-    bool stop = false;
-    switch (LS_U(item->current_anim_state)) {
-    case LS_SURF_BACK:
-        stop = !g_Input.back;
-        break;
-    case LS_SURF_LEFT:
-        stop = !g_Input.step_left;
-        break;
-    case LS_SURF_RIGHT:
-        stop = !g_Input.step_right;
-        break;
-    default:
-        break;
-    }
-
-    if (stop) {
-        item->goal_anim_state = LS(LS_SURF_TREAD);
     }
 
     item->fall_speed += 8;
