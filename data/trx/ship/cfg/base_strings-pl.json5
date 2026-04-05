@@ -1167,6 +1167,10 @@
             "title": "Responsywny paszport",
             "description": "Wyłącza blokowanie klawiszy podczas przewracania stron paszportu, zamiast tego kolejkując pożądaną nawigację.",
         },
+        "input.enable_touch_controls": {
+            "title": "\\{review}",
+            "description": "\\{review}",
+        },
         "input.enable_tr3_sidesteps": {
             "title": "Ulepszone kroki w bok",
             "description": "Umożliwia chodzenie w bok w stylu TR3+, tj. shift+strzałki kierunkowe. Naturalnie, przyciski dedykowane do kroków w bok nadal będą działać.",
@@ -1174,6 +1178,14 @@
         "input.quick_guns_mode": {
             "title": "Szybkie klawisze broni",
             "description": "Kontroluje zachowanie klawiszy do szybkiego wyposażania broni.\n\n- Wyposaż: naciśnięcie klawisza spowoduje, że Lara wyposaży daną broń.\n- Wyposaż lub schowaj: to samo co powyżej; dodatkowo Lara schowa daną broń, jeśli ma ją aktualnie wyposażoną.",
+        },
+        "input.touch_button_scale": {
+            "title": "\\{review}",
+            "description": "\\{review}",
+        },
+        "input.touch_opacity": {
+            "title": "\\{review}",
+            "description": "\\{review}",
         },
         "language": {
             "title": "Język",
