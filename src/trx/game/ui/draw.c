@@ -51,6 +51,13 @@ typedef struct {
 } M_DRAW_OP_QUAD;
 
 typedef struct {
+    M_DRAW_OP base;
+    float cx, cy, r_inner, r_outer;
+    int32_t z;
+    RGBA_F color;
+} M_DRAW_OP_CIRCLE;
+
+typedef struct {
     MEMORY_ARENA_ALLOCATOR alloc;
     VECTOR *ops;
 } M_PRIV;
@@ -313,6 +320,18 @@ static void M_DrawOp_Quad(const M_DRAW_OP_QUAD *const op)
         op->x0, op->y0, op->x1, op->y1, op->z, op->tl, op->tr, op->bl, op->br);
 }
 
+static void M_DrawOp_Circle(const M_DRAW_OP_CIRCLE *const op)
+{
+    OutputSource_UI_StageCircle((OUTPUT_UI_CIRCLE) {
+        .cx = op->cx,
+        .cy = op->cy,
+        .r_inner = op->r_inner,
+        .r_outer = op->r_outer,
+        .z = (float)(Output_GetNearZ_UI() + op->z),
+        .color = op->color,
+    });
+}
+
 // Allocate a new deferred draw operation in the arena.
 static inline void *M_ArenaAlloc(const size_t sz)
 {
@@ -446,6 +465,22 @@ void UI_ScheduleDrawHorizontalLine(
             .x1 = x1,
             .y = y,
             .z = z,
+        }));
+}
+
+void UI_ScheduleDrawScreenCircle(
+    const float cx, const float cy, const float r_inner, const float r_outer,
+    const int32_t z, const RGBA_F color)
+{
+    M_SCHEDULE_OP(
+        M_DrawOp_Circle,
+        ((M_DRAW_OP_CIRCLE) {
+            .cx = cx,
+            .cy = cy,
+            .r_inner = r_inner,
+            .r_outer = r_outer,
+            .z = z,
+            .color = color,
         }));
 }
 

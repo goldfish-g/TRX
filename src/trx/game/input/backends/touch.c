@@ -1,5 +1,7 @@
 #include <trx/game/input/backends/touch.h>
 
+#include <trx/config.h>
+#include <trx/config/common.h>
 #include <trx/game/input/common.h>
 #include <trx/game/ui/touch_overlay.h>
 
@@ -28,6 +30,12 @@ static void M_Shutdown(void)
 
 static void M_ProcessEvent(const SDL_Event *const event)
 {
+    if (event->type == SDL_FINGERDOWN
+        && !g_Config.input.enable_touch_controls) {
+        g_Config.input.enable_touch_controls = true;
+        TouchOverlay_SetVisible(true);
+        Config_Write();
+    }
     TouchOverlay_ProcessEvent(event);
 }
 

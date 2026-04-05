@@ -3,7 +3,10 @@
 #include <trx/config.h>
 #include <trx/core/colors.h>
 #include <trx/game/input/common.h>
-#include <trx/game/output/draw.h>
+#include <trx/game/objects.h>
+#include <trx/game/output/const.h>
+#include <trx/game/output/textures.h>
+#include <trx/game/ui/draw.h>
 #include <trx/game/viewport.h>
 #include <trx/version.h>
 
@@ -19,6 +22,20 @@
 #define DPAD_THUMB_LIMIT 0.68f
 #define ORBIT_ANGLE_STEP 45
 #define HIT_GENEROSITY 1.2f
+#define FINGER_RADIUS 0.025f
+
+// Sprite index offsets within O_ALPHABET for touch overlay icons.
+// Must match mapping_touch.txt and text_autogen.def.
+#define TOUCH_SPRITE_JUMP 782
+#define TOUCH_SPRITE_CROUCH 783
+#define TOUCH_SPRITE_WALK 784
+#define TOUCH_SPRITE_RUN 785
+#define TOUCH_SPRITE_DRAW_WEAPON 786
+#define TOUCH_SPRITE_LOOK 787
+#define TOUCH_SPRITE_ACTION 788
+#define TOUCH_SPRITE_ROLL 789
+#define TOUCH_SPRITE_MENU 790
+#define TOUCH_SPRITE_PAUSE 791
 
 typedef enum {
     ANCHOR_BOTTOM_LEFT,
@@ -58,7 +75,7 @@ typedef struct {
 // clang-format off
 static const TOUCH_BUTTON_DEF m_ButtonDefs[] = {
     // D-pad
-    { .role = INPUT_ROLE_UP,          .anchor = ANCHOR_BOTTOM_LEFT,  .offset_x = 0.15f, .offset_y = 0.13f, .radius = 0.11f, .engine_mask = 0x7, .is_dpad = true },
+    { .role = INPUT_ROLE_UP,          .anchor = ANCHOR_BOTTOM_LEFT,  .offset_x = 0.15f, .offset_y = 0.15f, .radius = 0.11f, .engine_mask = 0x7, .is_dpad = true },
 
     // Main action buttons
     { .role = INPUT_ROLE_JUMP,        .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.10f, .offset_y = 0.10f, .radius = 0.065f, .engine_mask = 0x7 },
@@ -76,8 +93,8 @@ static const TOUCH_BUTTON_DEF m_ButtonDefs[] = {
     { .role = INPUT_ROLE_DRAW_WEAPON, .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.13f, .offset_y = 0.13f, .radius = 0.035f, .engine_mask = 0x4 },
 
     // Top bar
-    { .role = INPUT_ROLE_INVENTORY,   .anchor = ANCHOR_TOP_CENTER,   .offset_x = -0.08f, .offset_y = 0.04f, .radius = 0.03f, .engine_mask = 0x7 },
-    { .role = INPUT_ROLE_PAUSE,       .anchor = ANCHOR_TOP_CENTER,   .offset_x = 0.08f, .offset_y = 0.04f, .radius = 0.03f, .engine_mask = 0x7 },
+    { .role = INPUT_ROLE_INVENTORY,   .anchor = ANCHOR_TOP_CENTER,   .offset_x = -0.05f, .offset_y = 0.04f, .radius = 0.03f, .engine_mask = 0x7 },
+    { .role = INPUT_ROLE_PAUSE,       .anchor = ANCHOR_TOP_CENTER,   .offset_x = 0.05f, .offset_y = 0.04f, .radius = 0.03f, .engine_mask = 0x7 },
 };
 // clang-format on
 
@@ -88,6 +105,8 @@ static bool m_Visible = false;
 static TOUCH_BUTTON m_Buttons[MAX_BUTTONS];
 static int32_t m_NumButtons = 0;
 static FINGER_STATE m_Fingers[MAX_FINGERS];
+static float m_FingerRadius = 0.0f;
+static float m_BorderThickness = 0.0f;
 
 // D-pad state
 static SDL_FingerID m_DpadFingerId = -1;
@@ -124,6 +143,9 @@ static void M_ComputeButtonLayout(void)
     const float ref = (float)(vw < vh ? vw : vh);
     const float scale = g_Config.input.touch_button_scale;
     const uint8_t engine_mask = M_GetEngineMask();
+
+    m_FingerRadius = FINGER_RADIUS * ref * scale;
+    m_BorderThickness = ref * 0.004f * scale;
 
     m_NumButtons = 0;
     for (int32_t i = 0; i < (int32_t)NUM_BUTTON_DEFS; i++) {
@@ -165,14 +187,77 @@ static void M_ComputeButtonLayout(void)
     }
 }
 
-static const RGBA_8888 M_FILL_NORMAL = { .r = 0, .g = 0, .b = 0, .a = 132 };
-static const RGBA_8888 M_FILL_ACTIVE = { .r = 0, .g = 0, .b = 0, .a = 189 };
+// Circle disc fill (dark centre of each button)
+static const RGBA_8888 M_DISC_NORMAL = { .r = 30, .g = 30, .b = 30, .a = 120 };
+static const RGBA_8888 M_DISC_ACTIVE = { .r = 30, .g = 30, .b = 30, .a = 210 };
+// Circle border ring (bright outline)
+static const RGBA_8888 M_RING_NORMAL = {
+    .r = 255, .g = 255, .b = 255, .a = 120
+};
+static const RGBA_8888 M_RING_ACTIVE = {
+    .r = 255, .g = 255, .b = 255, .a = 220
+};
+// Icon glyph tint
 static const RGBA_8888 M_BORDER_NORMAL = {
-    .r = 255, .g = 255, .b = 255, .a = 87
+    .r = 255, .g = 255, .b = 255, .a = 113
 };
 static const RGBA_8888 M_BORDER_ACTIVE = {
-    .r = 255, .g = 255, .b = 255, .a = 184
+    .r = 255, .g = 255, .b = 255, .a = 239
 };
+
+static int32_t M_GetGlyphIndex(const INPUT_ROLE role)
+{
+    // clang-format off
+    switch (role) {
+    case INPUT_ROLE_JUMP:        return TOUCH_SPRITE_JUMP;
+    case INPUT_ROLE_SLOW:        return TOUCH_SPRITE_WALK;
+    case INPUT_ROLE_SPRINT:      return TOUCH_SPRITE_RUN;
+    case INPUT_ROLE_CROUCH:      return TOUCH_SPRITE_CROUCH;
+    case INPUT_ROLE_DRAW_WEAPON: return TOUCH_SPRITE_DRAW_WEAPON;
+    case INPUT_ROLE_LOOK:        return TOUCH_SPRITE_LOOK;
+    case INPUT_ROLE_ACTION:      return TOUCH_SPRITE_ACTION;
+    case INPUT_ROLE_ROLL:        return TOUCH_SPRITE_ROLL;
+    case INPUT_ROLE_INVENTORY:   return TOUCH_SPRITE_MENU;
+    case INPUT_ROLE_PAUSE:       return TOUCH_SPRITE_PAUSE;
+    default:                     return -1;
+    }
+    // clang-format on
+}
+
+// Draw a touch sprite from O_ALPHABET centered at (cx, cy), scaled to fit
+// within a square of side `diameter` pixels.
+static void M_DrawTouchSprite(
+    const int32_t cx, const int32_t cy, const int32_t z,
+    const int32_t glyph_idx, const int32_t diameter, const RGBA_F colors[4])
+{
+    if (glyph_idx < 0 || diameter <= 0) {
+        return;
+    }
+    const OBJECT *const alphabet = Object_Get(O_ALPHABET);
+    if (alphabet == nullptr || !alphabet->loaded) {
+        return;
+    }
+    const int32_t sprite_idx = alphabet->mesh_idx + glyph_idx;
+    const SPRITE_TEXTURE *const spr = Output_GetSpriteTexture(sprite_idx);
+    if (spr == nullptr) {
+        return;
+    }
+    const int32_t sw = spr->x1 - spr->x0;
+    const int32_t sh = spr->y1 - spr->y0;
+    if (sw <= 0 || sh <= 0) {
+        return;
+    }
+    const int32_t scale =
+        (int32_t)((float)diameter * PHD_ONE / (sw > sh ? sw : sh));
+    const int32_t scale_h = scale;
+    const int32_t scale_v = scale;
+    const int32_t sx =
+        cx - (int32_t)((float)scale_h * (spr->x0 + spr->x1) / 2.0f / PHD_ONE);
+    const int32_t sy =
+        cy - (int32_t)((float)scale_v * (spr->y0 + spr->y1) / 2.0f / PHD_ONE);
+    UI_ScheduleDrawScreenSprite(
+        sx, sy, z, scale_h, scale_v, sprite_idx, colors);
+}
 
 static void M_DrawButton(const TOUCH_BUTTON *const btn, const int32_t z)
 {
@@ -181,32 +266,44 @@ static void M_DrawButton(const TOUCH_BUTTON *const btn, const int32_t z)
     }
 
     const float opacity = g_Config.input.touch_opacity;
-    const RGBA_8888 fill = btn->active ? M_FILL_ACTIVE : M_FILL_NORMAL;
-    const RGBA_8888 border = btn->active ? M_BORDER_ACTIVE : M_BORDER_NORMAL;
+    const RGBA_8888 disc_raw = btn->active ? M_DISC_ACTIVE : M_DISC_NORMAL;
+    const RGBA_8888 ring_raw = btn->active ? M_RING_ACTIVE : M_RING_NORMAL;
+    const RGBA_8888 border_raw =
+        btn->active ? M_BORDER_ACTIVE : M_BORDER_NORMAL;
 
-    RGBA_8888 fill_adj = {
-        .r = fill.r,
-        .g = fill.g,
-        .b = fill.b,
-        .a = (uint8_t)(fill.a * opacity),
+    const RGBA_F disc_f = {
+        .r = disc_raw.r / 255.0f,
+        .g = disc_raw.g / 255.0f,
+        .b = disc_raw.b / 255.0f,
+        .a = (disc_raw.a / 255.0f) * opacity,
     };
-    RGBA_8888 border_adj = {
-        .r = border.r,
-        .g = border.g,
-        .b = border.b,
-        .a = (uint8_t)(border.a * opacity),
+    const RGBA_F ring_f = {
+        .r = ring_raw.r / 255.0f,
+        .g = ring_raw.g / 255.0f,
+        .b = ring_raw.b / 255.0f,
+        .a = (ring_raw.a / 255.0f) * opacity,
+    };
+    const RGBA_F border_f = {
+        .r = border_raw.r / 255.0f,
+        .g = border_raw.g / 255.0f,
+        .b = border_raw.b / 255.0f,
+        .a = (border_raw.a / 255.0f) * opacity,
     };
 
-    const int32_t r = (int32_t)btn->radius;
-    const int32_t cx = (int32_t)btn->cx;
-    const int32_t cy = (int32_t)btn->cy;
+    const float cx = btn->cx;
+    const float cy = btn->cy;
+    const float r = btn->radius;
 
-    // Draw button as a square (circle approximation via square for now).
-    // Border
-    Output_DrawScreenFlatQuad(
-        cx - r - 1, cy - r - 1, z, (r + 1) * 2, (r + 1) * 2, border_adj);
-    // Fill
-    Output_DrawScreenFlatQuad(cx - r, cy - r, z + 1, r * 2, r * 2, fill_adj);
+    // Background disc + border ring (drawn via vector, not sprite)
+    UI_ScheduleDrawScreenCircle(cx, cy, 0.0f, r, z, disc_f);
+    UI_ScheduleDrawScreenCircle(cx, cy, r - m_BorderThickness, r, z, ring_f);
+
+    // Role icon, scaled to fit within the button circle
+    const int32_t glyph_idx = M_GetGlyphIndex(btn->role);
+    const int32_t icon_d = (int32_t)r;
+    const RGBA_F icon_colors[4] = { border_f, border_f, border_f, border_f };
+    M_DrawTouchSprite(
+        (int32_t)cx, (int32_t)cy, z + 1, glyph_idx, icon_d, icon_colors);
 }
 
 static void M_DrawDpad(const int32_t z)
@@ -224,33 +321,38 @@ static void M_DrawDpad(const int32_t z)
     }
 
     const float opacity = g_Config.input.touch_opacity;
-    const RGBA_8888 bg = {
-        .r = 0,
-        .g = 0,
-        .b = 0,
-        .a = (uint8_t)(120 * opacity),
+    const RGBA_F bg_disc_f = {
+        .r = M_DISC_NORMAL.r / 255.0f,
+        .g = M_DISC_NORMAL.g / 255.0f,
+        .b = M_DISC_NORMAL.b / 255.0f,
+        .a = (M_DISC_NORMAL.a / 255.0f) * opacity,
     };
-    const RGBA_8888 thumb_color = {
-        .r = 200,
-        .g = 200,
-        .b = 200,
-        .a = (uint8_t)(180 * opacity),
+    const RGBA_F bg_ring_f = {
+        .r = M_RING_NORMAL.r / 255.0f,
+        .g = M_RING_NORMAL.g / 255.0f,
+        .b = M_RING_NORMAL.b / 255.0f,
+        .a = (M_RING_NORMAL.a / 255.0f) * opacity,
+    };
+    const RGBA_F thumb_f = {
+        .r = 200.0f / 255.0f,
+        .g = 200.0f / 255.0f,
+        .b = 200.0f / 255.0f,
+        .a = (180.0f / 255.0f) * opacity,
     };
 
-    const int32_t r = (int32_t)dpad->radius;
-    const int32_t cx = (int32_t)dpad->cx;
-    const int32_t cy = (int32_t)dpad->cy;
+    const float cx = dpad->cx;
+    const float cy = dpad->cy;
+    const float r = dpad->radius;
 
-    // D-pad background
-    Output_DrawScreenFlatQuad(cx - r, cy - r, z, r * 2, r * 2, bg);
+    // D-pad background disc + border ring
+    UI_ScheduleDrawScreenCircle(cx, cy, 0.0f, r, z, bg_disc_f);
+    UI_ScheduleDrawScreenCircle(cx, cy, r - m_BorderThickness, r, z, bg_ring_f);
 
-    // Thumb indicator
-    const int32_t thumb_r = r / 4;
-    const int32_t tx = cx + (int32_t)(m_DpadThumbX * dpad->radius);
-    const int32_t ty = cy + (int32_t)(m_DpadThumbY * dpad->radius);
-    Output_DrawScreenFlatQuad(
-        tx - thumb_r, ty - thumb_r, z + 1, thumb_r * 2, thumb_r * 2,
-        thumb_color);
+    // Thumb indicator: small filled disc at current thumb position
+    const float thumb_r = r * 0.25f;
+    const float tx = cx + m_DpadThumbX * r;
+    const float ty = cy + m_DpadThumbY * r;
+    UI_ScheduleDrawScreenCircle(tx, ty, 0.0f, thumb_r, z + 1, thumb_f);
 }
 
 // --- Touch event processing ---
@@ -298,23 +400,6 @@ static void M_UpdateDpadFromFinger(
     Touch_SetState(INPUT_ROLE_RIGHT, nx > DPAD_DIR_THRESHOLD);
 }
 
-static TOUCH_BUTTON *M_HitTest(const float px, const float py)
-{
-    for (int32_t i = 0; i < m_NumButtons; i++) {
-        TOUCH_BUTTON *btn = &m_Buttons[i];
-        if (!btn->visible || btn->is_dpad) {
-            continue;
-        }
-        const float dx = px - btn->cx;
-        const float dy = py - btn->cy;
-        const float hit_r = btn->radius * HIT_GENEROSITY;
-        if (dx * dx + dy * dy <= hit_r * hit_r) {
-            return btn;
-        }
-    }
-    return nullptr;
-}
-
 static TOUCH_BUTTON *M_FindDpad(void)
 {
     for (int32_t i = 0; i < m_NumButtons; i++) {
@@ -345,7 +430,9 @@ static void M_SyncButtonStates(void)
         btn->active = false;
     }
 
-    // Check each active finger against buttons
+    // Each active finger activates all buttons whose circle overlaps the
+    // finger's contact circle (radius m_FingerRadius), allowing a single
+    // finger to press two adjacent buttons at once.
     for (int32_t f = 0; f < MAX_FINGERS; f++) {
         if (!m_Fingers[f].active) {
             continue;
@@ -353,9 +440,19 @@ static void M_SyncButtonStates(void)
         if (m_DpadActive && m_Fingers[f].id == m_DpadFingerId) {
             continue;
         }
-        TOUCH_BUTTON *btn = M_HitTest(m_Fingers[f].x, m_Fingers[f].y);
-        if (btn != nullptr) {
-            btn->active = true;
+        const float fx = m_Fingers[f].x;
+        const float fy = m_Fingers[f].y;
+        for (int32_t i = 0; i < m_NumButtons; i++) {
+            TOUCH_BUTTON *btn = &m_Buttons[i];
+            if (!btn->visible || btn->is_dpad) {
+                continue;
+            }
+            const float dx = fx - btn->cx;
+            const float dy = fy - btn->cy;
+            const float hit_r = btn->radius * HIT_GENEROSITY + m_FingerRadius;
+            if (dx * dx + dy * dy <= hit_r * hit_r) {
+                btn->active = true;
+            }
         }
     }
 
@@ -464,6 +561,8 @@ void TouchOverlay_Init(void)
     m_DpadFingerId = -1;
     m_DpadThumbX = 0.0f;
     m_DpadThumbY = 0.0f;
+    m_FingerRadius = 0.0f;
+    m_BorderThickness = 0.0f;
     memset(m_Fingers, 0, sizeof(m_Fingers));
 }
 
@@ -504,6 +603,7 @@ void TouchOverlay_Draw(void)
     if (m_NumButtons == 0) {
         return;
     }
+    M_SyncButtonStates();
 
     const int32_t z = 0;
 

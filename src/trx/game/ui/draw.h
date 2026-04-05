@@ -21,6 +21,8 @@ void UI_ScheduleDrawScreenGradientQuad(
     RGBA_8888 tr, RGBA_8888 bl, RGBA_8888 br);
 void UI_ScheduleDrawHorizontalLine(
     UI_STYLE ui_style, int32_t x0, int32_t x1, int32_t y, int32_t z);
+void UI_ScheduleDrawScreenCircle(
+    float cx, float cy, float r_inner, float r_outer, int32_t z, RGBA_F color);
 
 void UI_InitDraw(void);
 void UI_ShutdownDraw(void);
