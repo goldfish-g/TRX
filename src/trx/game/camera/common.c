@@ -444,10 +444,10 @@ void Camera_MoveModern(void)
 
         const int32_t target32 = Lara_ModernGetTargetAngle();
         if (target32 != MODERN_ANGLE_NONE) {
-            // Stick active and off-axis: stronger proportional creep.
-            // Pure proportional — no hard cap, so there's no flat-rate
-            // region that would feel jerky.
-            step += cam_delta / 10;
+            // Stick active and off-axis: proportional creep.
+            // Pure linear ratio gives smooth exponential decay —
+            // no cap or non-linearity that would cause stepping.
+            step += cam_delta / 32;
         } else {
             // No stick input: gentle convergence only
             step += cam_delta / 192;

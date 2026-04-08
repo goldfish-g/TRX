@@ -39,13 +39,13 @@ static void M_Compress(ITEM *const item, COLL_INFO *const coll)
                 item->goal_anim_state = LS(LS_JUMP_BACK);
                 lara->move_angle = item->rot.y + DEG_180;
             } else if (
-                delta > 0
+                delta > 0 && abs_delta >= DEG_45
                 && Lara_FloorFront(item, item->rot.y + DEG_90, STEP_L)
                     >= -STEPUP_HEIGHT) {
                 item->goal_anim_state = LS(LS_JUMP_RIGHT);
                 lara->move_angle = item->rot.y + DEG_90;
             } else if (
-                delta < 0
+                delta < 0 && abs_delta >= DEG_45
                 && Lara_FloorFront(item, item->rot.y - DEG_90, STEP_L)
                     >= -STEPUP_HEIGHT) {
                 item->goal_anim_state = LS(LS_JUMP_LEFT);

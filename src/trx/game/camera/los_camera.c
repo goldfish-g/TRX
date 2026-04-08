@@ -285,6 +285,13 @@ static void M_Move(GAME_VECTOR *const ideal, const int32_t speed)
     g_Camera.pos.z += (ideal->z - g_Camera.pos.z) / speed;
     g_Camera.pos.room_num = ideal->room_num;
 
+    // If the interpolated path clips through a wall, skip the
+    // interpolation and cut directly to the ideal position.
+    GAME_VECTOR los_test = g_Camera.pos;
+    if (!M_LOS(&g_Camera.target, &los_test, 0)) {
+        g_Camera.pos = *ideal;
+    }
+
     Camera_ApplyBounce();
 
     XYZ_32 pos = g_Camera.pos.pos;
@@ -345,6 +352,12 @@ static void M_Move(GAME_VECTOR *const ideal, const int32_t speed)
     } else if (
         ceiling >= height || height == NO_HEIGHT || ceiling == NO_HEIGHT) {
         g_Camera.pos = *ideal;
+    }
+
+    // Final safety net: if the camera still doesn't have clear LOS to
+    // the target, pull it toward the target until it does.
+    if (!M_LOS(&g_Camera.target, &g_Camera.pos, 0)) {
+        M_Collide(&g_Camera.pos, M_CHASE_SHIFT, true);
     }
 
     Room_GetSector(g_Camera.pos.pos, &g_Camera.pos.room_num);
