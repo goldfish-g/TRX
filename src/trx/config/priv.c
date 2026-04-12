@@ -109,6 +109,15 @@ static void M_LoadInputConfig(JSON_OBJECT *const root_obj)
             M_LoadInputLayout(controller_obj, INPUT_BACKEND_CONTROLLER, layout);
         }
     }
+
+    JSON_OBJECT *const touch_obj =
+        JSON_ObjectGetObject(input_obj, "touch");
+    if (touch_obj != nullptr) {
+        for (INPUT_LAYOUT layout = INPUT_LAYOUT_CUSTOM_1;
+             layout < INPUT_LAYOUT_NUMBER_OF; layout++) {
+            M_LoadInputLayout(touch_obj, INPUT_BACKEND_NUMBER_OF, layout);
+        }
+    }
 }
 
 static void M_DumpInputLayout(
@@ -152,6 +161,13 @@ static void M_DumpInputConfig(JSON_OBJECT *const root_obj)
          layout < INPUT_LAYOUT_NUMBER_OF; layout++) {
         M_DumpInputLayout(keyboard_obj, INPUT_BACKEND_KEYBOARD, layout);
         M_DumpInputLayout(controller_obj, INPUT_BACKEND_CONTROLLER, layout);
+    }
+
+    JSON_OBJECT *const touch_obj = JSON_ObjectNew();
+    JSON_ObjectAppendObject(input_obj, "touch", touch_obj);
+    for (INPUT_LAYOUT layout = INPUT_LAYOUT_CUSTOM_1;
+         layout < INPUT_LAYOUT_NUMBER_OF; layout++) {
+        M_DumpInputLayout(touch_obj, INPUT_BACKEND_NUMBER_OF, layout);
     }
 }
 

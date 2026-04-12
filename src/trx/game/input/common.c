@@ -107,6 +107,8 @@ static INPUT_BACKEND_IMPL *M_GetBackend(const INPUT_BACKEND backend)
         return &g_Input_Keyboard;
     case INPUT_BACKEND_CONTROLLER:
         return &g_Input_Controller;
+    case INPUT_BACKEND_NUMBER_OF:
+        return &g_Input_Touch;
     default:
         return nullptr;
     }

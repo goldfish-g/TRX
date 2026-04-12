@@ -8,6 +8,7 @@
 #include <trx/game/input.h>
 #include <trx/game/shell.h>
 #include <trx/game/sound.h>
+#include <trx/game/ui/touch_overlay.h>
 #include <trx/game/ui/elements/anchor.h>
 #include <trx/game/ui/elements/frame.h>
 #include <trx/game/ui/elements/hide.h>
@@ -34,6 +35,11 @@ typedef enum {
     M_PHASE_LISTEN_DEBOUNCE,
     M_PHASE_EXIT,
 } M_PHASE;
+
+static bool M_IsTouch(const UI_CONTROLS_EDITOR_STATE *const s)
+{
+    return s->backend == INPUT_BACKEND_NUMBER_OF;
+}
 
 static const UI_CONTROLS_EDITOR_GROUP m_Groups[] = {
     {
@@ -348,6 +354,9 @@ static UI_CONTROLS_CHOICE M_NavigateInputsDebounce(
     if (InputState_IsAnyPressed(g_Input)) {
         return UI_CONTROLS_CHOICE_NOOP;
     }
+    if (M_IsTouch(s)) {
+        TouchOverlay_EnterSelectionMode();
+    }
     Input_EnterListenMode();
     s->phase = M_PHASE_LISTEN;
     return UI_CONTROLS_CHOICE_NOOP;
@@ -360,6 +369,9 @@ static UI_CONTROLS_CHOICE M_Listen(UI_CONTROLS_EDITOR_STATE *const s)
         return UI_CONTROLS_CHOICE_NOOP;
     }
 
+    if (M_IsTouch(s)) {
+        TouchOverlay_ExitSelectionMode();
+    }
     Input_ExitListenMode();
 
     const EVENT event = {

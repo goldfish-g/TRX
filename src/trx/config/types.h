@@ -52,8 +52,10 @@ typedef struct {
         bool enable_buffering_func_keys;
         bool enable_buffering_inventory;
         bool enable_touch_controls;
+        int32_t touch_layout;
         float touch_opacity;
         float touch_button_scale;
+        float touch_dpad_scale;
         QUICK_GUNS_MODE quick_guns_mode;
     } input;
 

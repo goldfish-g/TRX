@@ -27,12 +27,14 @@ void Input_Update(void)
         &g_Input, &g_Input_Keyboard, g_Config.input.keyboard_layout);
     M_UpdateFromBackend(
         &g_Input, &g_Input_Controller, g_Config.input.controller_layout);
-    M_UpdateFromBackend(&g_Input, &g_Input_Touch, INPUT_LAYOUT_DEFAULT);
+    M_UpdateFromBackend(
+        &g_Input, &g_Input_Touch, g_Config.input.touch_layout);
 
     // Suppress roles whose bindings are subsets of longer active combos.
     g_Input_Keyboard.resolve_combos(g_Config.input.keyboard_layout, &g_Input);
     g_Input_Controller.resolve_combos(
         g_Config.input.controller_layout, &g_Input);
+    g_Input_Touch.resolve_combos(g_Config.input.touch_layout, &g_Input);
 
     g_Input.camera_reset |= g_Input.look;
     g_Input.menu_up |= g_Input.forward;

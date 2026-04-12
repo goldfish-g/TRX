@@ -25,6 +25,9 @@ void UI_Controls_Init(UI_CONTROLS_STATE *const s)
             &s->editor_state[backend], backend, g_Config.input.layout[backend],
             s->events);
     }
+    UI_ControlsEditor_Init(
+        &s->touch_editor_state, INPUT_BACKEND_NUMBER_OF,
+        g_Config.input.touch_layout, s->events);
 }
 
 void UI_Controls_Free(UI_CONTROLS_STATE *const s)
@@ -33,6 +36,7 @@ void UI_Controls_Free(UI_CONTROLS_STATE *const s)
          backend++) {
         UI_ControlsEditor_Free(&s->editor_state[backend]);
     }
+    UI_ControlsEditor_Free(&s->touch_editor_state);
     UI_ControlsBackend_Free(&s->backend_state);
     EventManager_Free(s->events);
     s->events = nullptr;
@@ -55,13 +59,30 @@ bool UI_Controls_Control(UI_CONTROLS_STATE *const s)
             g_Config.input.backend = s->backend;
             Config_Update();
             break;
+        case INPUT_BACKEND_NUMBER_OF: // touch controls
+            s->backend = INPUT_BACKEND_NUMBER_OF;
+            s->phase = M_PHASE_EDITOR;
+            break;
         }
         break;
     }
 
     case M_PHASE_EDITOR: {
+        UI_CONTROLS_EDITOR_STATE *editor =
+            s->backend == INPUT_BACKEND_NUMBER_OF
+            ? &s->touch_editor_state
+            : &s->editor_state[s->backend];
         const UI_CONTROLS_CHOICE choice =
-            UI_ControlsEditor_Control(&s->editor_state[s->backend]);
+            UI_ControlsEditor_Control(editor);
+
+        // Sync the editor's selected layout tab back to config so
+        // Input_Update uses the layout the user is editing.
+        if (s->backend == INPUT_BACKEND_NUMBER_OF) {
+            g_Config.input.touch_layout = editor->active_layout;
+        } else {
+            g_Config.input.layout[s->backend] = editor->active_layout;
+        }
+
         switch (choice) {
         case UI_CONTROLS_CHOICE_NOOP:
             break;
@@ -84,8 +105,13 @@ void UI_Controls(UI_CONTROLS_STATE *const s)
     case M_PHASE_BACKEND:
         UI_ControlsBackend(&s->backend_state);
         break;
-    case M_PHASE_EDITOR:
-        UI_ControlsEditor(&s->editor_state[s->backend]);
+    case M_PHASE_EDITOR: {
+        UI_CONTROLS_EDITOR_STATE *editor =
+            s->backend == INPUT_BACKEND_NUMBER_OF
+            ? &s->touch_editor_state
+            : &s->editor_state[s->backend];
+        UI_ControlsEditor(editor);
         break;
+    }
     }
 }

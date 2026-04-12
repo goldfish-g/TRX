@@ -6,6 +6,8 @@
 #include <trx/game/objects.h>
 #include <trx/game/output/const.h>
 #include <trx/game/output/textures.h>
+#include <trx/game/game/state.h>
+#include <trx/game/lara/common.h>
 #include <trx/game/ui/draw.h>
 #include <trx/game/viewport.h>
 #include <trx/version.h>
@@ -17,7 +19,7 @@
 #include <string.h>
 
 #define MAX_FINGERS 10
-#define DPAD_DEAD_ZONE 0.20f
+#define DPAD_DEAD_ZONE 0.50f
 #define DPAD_DIR_THRESHOLD 0.38f
 #define DPAD_THUMB_LIMIT 0.68f
 #define ORBIT_ANGLE_STEP 45
@@ -36,6 +38,7 @@
 #define TOUCH_SPRITE_ROLL 789
 #define TOUCH_SPRITE_MENU 790
 #define TOUCH_SPRITE_PAUSE 791
+#define TOUCH_SPRITE_BULLET 792
 
 typedef enum {
     ANCHOR_BOTTOM_LEFT,
@@ -61,6 +64,7 @@ typedef struct {
     bool active;
     INPUT_ROLE role;
     bool is_dpad;
+    int32_t def_index; // index into m_ButtonDefs
 } TOUCH_BUTTON;
 
 typedef struct {
@@ -89,8 +93,8 @@ static const TOUCH_BUTTON_DEF m_ButtonDefs[] = {
     // TR3: sprint/crouch replace draw_weapon position
     { .role = INPUT_ROLE_SPRINT,      .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.10f, .offset_y = 0.21f, .radius = 0.035f, .engine_mask = 0x4 },
     { .role = INPUT_ROLE_CROUCH,      .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.13f, .offset_y = 0.29f, .radius = 0.035f, .engine_mask = 0x4 },
-    // TR3: draw_weapon moves to different position
-    { .role = INPUT_ROLE_DRAW_WEAPON, .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.13f, .offset_y = 0.13f, .radius = 0.035f, .engine_mask = 0x4 },
+    // TR3: draw_weapon above action button
+    { .role = INPUT_ROLE_DRAW_WEAPON, .anchor = ANCHOR_BOTTOM_RIGHT, .offset_x = 0.21f, .offset_y = 0.32f, .radius = 0.035f, .engine_mask = 0x4 },
 
     // Top bar
     { .role = INPUT_ROLE_INVENTORY,   .anchor = ANCHOR_TOP_CENTER,   .offset_x = -0.05f, .offset_y = 0.04f, .radius = 0.03f, .engine_mask = 0x7 },
@@ -114,8 +118,38 @@ static bool m_DpadActive = false;
 static float m_DpadThumbX = 0.0f;
 static float m_DpadThumbY = 0.0f;
 
-// External function in touch backend
-void Touch_SetState(INPUT_ROLE role, bool pressed);
+// External functions in touch backend
+void Touch_SetPositionState(int32_t position, bool pressed);
+INPUT_ROLE Touch_GetPositionRole(int32_t position);
+
+// Position name table: D-pad directions first, then one per non-dpad button def.
+// clang-format off
+static const char *const m_PosNames[] = {
+    "\\{controller lstick up}",    // TOUCH_POS_DPAD_UP
+    "\\{controller lstick down}",  // TOUCH_POS_DPAD_DOWN
+    "\\{controller lstick left}",  // TOUCH_POS_DPAD_LEFT
+    "\\{controller lstick right}", // TOUCH_POS_DPAD_RIGHT
+    "Jump",           // m_ButtonDefs[1]
+    "Action",         // m_ButtonDefs[2]
+    "Walk",           // m_ButtonDefs[3]
+    "Look",           // m_ButtonDefs[4]
+    "Roll",           // m_ButtonDefs[5]
+    "Draw Weapon",    // m_ButtonDefs[6]  (TR1/2)
+    "Sprint",         // m_ButtonDefs[7]  (TR3)
+    "Crouch",         // m_ButtonDefs[8]  (TR3)
+    "Draw Weapon 2",  // m_ButtonDefs[9]  (TR3)
+    "Inventory",      // m_ButtonDefs[10]
+    "Pause",          // m_ButtonDefs[11]
+};
+// clang-format on
+
+#define NUM_POSITIONS (int32_t)(sizeof(m_PosNames) / sizeof(m_PosNames[0]))
+
+// Selection mode state (for remap listen phase)
+static bool m_SelectionMode = false;
+static int32_t m_SelectedPosition = -1;
+static bool m_WasVisibleBeforeSelection = false;
+static int32_t m_SelectionFingerCount = 0;
 
 static uint8_t M_GetEngineMask(void)
 {
@@ -141,11 +175,12 @@ static void M_ComputeButtonLayout(void)
     }
 
     const float ref = (float)(vw < vh ? vw : vh);
-    const float scale = g_Config.input.touch_button_scale;
+    const float btn_scale = g_Config.input.touch_button_scale;
+    const float dpad_scale = g_Config.input.touch_dpad_scale;
     const uint8_t engine_mask = M_GetEngineMask();
 
-    m_FingerRadius = FINGER_RADIUS * ref * scale;
-    m_BorderThickness = ref * 0.004f * scale;
+    m_FingerRadius = FINGER_RADIUS * ref * btn_scale;
+    m_BorderThickness = ref * 0.004f * btn_scale;
 
     m_NumButtons = 0;
     for (int32_t i = 0; i < (int32_t)NUM_BUTTON_DEFS; i++) {
@@ -154,7 +189,10 @@ static void M_ComputeButtonLayout(void)
             continue;
         }
 
+        const float scale = def->is_dpad ? (dpad_scale * 1.2f) : btn_scale;
+
         TOUCH_BUTTON *btn = &m_Buttons[m_NumButtons];
+        btn->def_index = i;
         btn->role = def->role;
         btn->is_dpad = def->is_dpad;
         btn->radius = def->radius * ref * scale;
@@ -215,7 +253,15 @@ static int32_t M_GetGlyphIndex(const INPUT_ROLE role)
     case INPUT_ROLE_CROUCH:      return TOUCH_SPRITE_CROUCH;
     case INPUT_ROLE_DRAW_WEAPON: return TOUCH_SPRITE_DRAW_WEAPON;
     case INPUT_ROLE_LOOK:        return TOUCH_SPRITE_LOOK;
-    case INPUT_ROLE_ACTION:      return TOUCH_SPRITE_ACTION;
+    case INPUT_ROLE_ACTION: {
+        const LARA_INFO *const lara = Lara_GetLaraInfo();
+        if (Game_IsPlaying() && lara != nullptr
+            && (lara->gun_status == LGS_READY || lara->gun_status == LGS_DRAW
+                || lara->gun_status == LGS_UNDRAW)) {
+            return TOUCH_SPRITE_BULLET;
+        }
+        return TOUCH_SPRITE_ACTION;
+    }
     case INPUT_ROLE_ROLL:        return TOUCH_SPRITE_ROLL;
     case INPUT_ROLE_INVENTORY:   return TOUCH_SPRITE_MENU;
     case INPUT_ROLE_PAUSE:       return TOUCH_SPRITE_PAUSE;
@@ -298,12 +344,15 @@ static void M_DrawButton(const TOUCH_BUTTON *const btn, const int32_t z)
     UI_ScheduleDrawScreenCircle(cx, cy, 0.0f, r, z, disc_f);
     UI_ScheduleDrawScreenCircle(cx, cy, r - m_BorderThickness, r, z, ring_f);
 
-    // Role icon, scaled to fit within the button circle
-    const int32_t glyph_idx = M_GetGlyphIndex(btn->role);
-    const int32_t icon_d = (int32_t)r;
+    // Role icon, scaled to 75% of button diameter for better visibility
+    const int32_t pos = btn->def_index + 3;
+    const INPUT_ROLE bound_role = Touch_GetPositionRole(pos);
+    const int32_t glyph_idx = M_GetGlyphIndex(bound_role);
+    const int32_t icon_d = (int32_t)(r * 1.5f);
     const RGBA_F icon_colors[4] = { border_f, border_f, border_f, border_f };
     M_DrawTouchSprite(
-        (int32_t)cx, (int32_t)cy, z + 1, glyph_idx, icon_d, icon_colors);
+        (int32_t)roundf(cx), (int32_t)roundf(cy), z + 1, glyph_idx, icon_d,
+        icon_colors);
 }
 
 static void M_DrawDpad(const int32_t z)
@@ -348,6 +397,11 @@ static void M_DrawDpad(const int32_t z)
     UI_ScheduleDrawScreenCircle(cx, cy, 0.0f, r, z, bg_disc_f);
     UI_ScheduleDrawScreenCircle(cx, cy, r - m_BorderThickness, r, z, bg_ring_f);
 
+    // Deadzone ring
+    const float dz_r = r * DPAD_DEAD_ZONE;
+    UI_ScheduleDrawScreenCircle(
+        cx, cy, dz_r - m_BorderThickness, dz_r, z, bg_ring_f);
+
     // Thumb indicator: small filled disc at current thumb position
     const float thumb_r = r * 0.25f;
     const float tx = cx + m_DpadThumbX * r;
@@ -363,10 +417,10 @@ static void M_ResetDpad(void)
     m_DpadFingerId = -1;
     m_DpadThumbX = 0.0f;
     m_DpadThumbY = 0.0f;
-    Touch_SetState(INPUT_ROLE_UP, false);
-    Touch_SetState(INPUT_ROLE_DOWN, false);
-    Touch_SetState(INPUT_ROLE_LEFT, false);
-    Touch_SetState(INPUT_ROLE_RIGHT, false);
+    Touch_SetPositionState(TOUCH_POS_DPAD_UP, false);
+    Touch_SetPositionState(TOUCH_POS_DPAD_DOWN, false);
+    Touch_SetPositionState(TOUCH_POS_DPAD_LEFT, false);
+    Touch_SetPositionState(TOUCH_POS_DPAD_RIGHT, false);
 }
 
 static void M_UpdateDpadFromFinger(
@@ -380,10 +434,10 @@ static void M_UpdateDpadFromFinger(
     if (dist < r * DPAD_DEAD_ZONE) {
         m_DpadThumbX = 0.0f;
         m_DpadThumbY = 0.0f;
-        Touch_SetState(INPUT_ROLE_UP, false);
-        Touch_SetState(INPUT_ROLE_DOWN, false);
-        Touch_SetState(INPUT_ROLE_LEFT, false);
-        Touch_SetState(INPUT_ROLE_RIGHT, false);
+        Touch_SetPositionState(TOUCH_POS_DPAD_UP, false);
+        Touch_SetPositionState(TOUCH_POS_DPAD_DOWN, false);
+        Touch_SetPositionState(TOUCH_POS_DPAD_LEFT, false);
+        Touch_SetPositionState(TOUCH_POS_DPAD_RIGHT, false);
         return;
     }
 
@@ -394,10 +448,10 @@ static void M_UpdateDpadFromFinger(
     m_DpadThumbX = (nx * clamp) / r;
     m_DpadThumbY = (ny * clamp) / r;
 
-    Touch_SetState(INPUT_ROLE_UP, ny < -DPAD_DIR_THRESHOLD);
-    Touch_SetState(INPUT_ROLE_DOWN, ny > DPAD_DIR_THRESHOLD);
-    Touch_SetState(INPUT_ROLE_LEFT, nx < -DPAD_DIR_THRESHOLD);
-    Touch_SetState(INPUT_ROLE_RIGHT, nx > DPAD_DIR_THRESHOLD);
+    Touch_SetPositionState(TOUCH_POS_DPAD_UP, ny < -DPAD_DIR_THRESHOLD);
+    Touch_SetPositionState(TOUCH_POS_DPAD_DOWN, ny > DPAD_DIR_THRESHOLD);
+    Touch_SetPositionState(TOUCH_POS_DPAD_LEFT, nx < -DPAD_DIR_THRESHOLD);
+    Touch_SetPositionState(TOUCH_POS_DPAD_RIGHT, nx > DPAD_DIR_THRESHOLD);
 }
 
 static TOUCH_BUTTON *M_FindDpad(void)
@@ -456,13 +510,14 @@ static void M_SyncButtonStates(void)
         }
     }
 
-    // Propagate button states to input backend
+    // Propagate button position states to input backend
     for (int32_t i = 0; i < m_NumButtons; i++) {
         TOUCH_BUTTON *btn = &m_Buttons[i];
         if (btn->is_dpad) {
             continue;
         }
-        Touch_SetState(btn->role, btn->active);
+        const int32_t pos = btn->def_index + 3;
+        Touch_SetPositionState(pos, btn->active);
     }
 }
 
@@ -486,12 +541,55 @@ static FINGER_STATE *M_AllocFinger(void)
     return nullptr;
 }
 
+// In selection mode, determine which position was tapped.
+static int32_t M_HitTestPosition(const float px, const float py)
+{
+    // Check D-pad directions
+    TOUCH_BUTTON *dpad = M_FindDpad();
+    if (dpad != nullptr && M_IsInDpad(dpad, px, py)) {
+        const float dx = px - dpad->cx;
+        const float dy = py - dpad->cy;
+        // Pick the dominant direction
+        if (fabsf(dy) > fabsf(dx)) {
+            return dy < 0 ? TOUCH_POS_DPAD_UP : TOUCH_POS_DPAD_DOWN;
+        } else {
+            return dx < 0 ? TOUCH_POS_DPAD_LEFT : TOUCH_POS_DPAD_RIGHT;
+        }
+    }
+
+    // Check regular buttons
+    for (int32_t i = 0; i < m_NumButtons; i++) {
+        TOUCH_BUTTON *btn = &m_Buttons[i];
+        if (!btn->visible || btn->is_dpad) {
+            continue;
+        }
+        const float dx = px - btn->cx;
+        const float dy = py - btn->cy;
+        const float hit_r = btn->radius * HIT_GENEROSITY;
+        if (dx * dx + dy * dy <= hit_r * hit_r) {
+            return btn->def_index + 3;
+        }
+    }
+    return -1;
+}
+
 static void M_HandleFingerDown(const SDL_TouchFingerEvent *const ev)
 {
     const int32_t vw = Viewport_GetWidth(VIEWPORT_UI);
     const int32_t vh = Viewport_GetHeight(VIEWPORT_UI);
     const float px = ev->x * vw;
     const float py = ev->y * vh;
+
+    // In selection mode, record which position was tapped
+    if (m_SelectionMode) {
+        M_ComputeButtonLayout();
+        m_SelectionFingerCount++;
+        const int32_t pos = M_HitTestPosition(px, py);
+        if (pos >= 0) {
+            m_SelectedPosition = pos;
+        }
+        return;
+    }
 
     FINGER_STATE *finger = M_AllocFinger();
     if (finger == nullptr) {
@@ -515,6 +613,10 @@ static void M_HandleFingerDown(const SDL_TouchFingerEvent *const ev)
 
 static void M_HandleFingerMotion(const SDL_TouchFingerEvent *const ev)
 {
+    if (m_SelectionMode) {
+        return;
+    }
+
     const int32_t vw = Viewport_GetWidth(VIEWPORT_UI);
     const int32_t vh = Viewport_GetHeight(VIEWPORT_UI);
     const float px = ev->x * vw;
@@ -539,6 +641,13 @@ static void M_HandleFingerMotion(const SDL_TouchFingerEvent *const ev)
 
 static void M_HandleFingerUp(const SDL_TouchFingerEvent *const ev)
 {
+    if (m_SelectionMode) {
+        if (m_SelectionFingerCount > 0) {
+            m_SelectionFingerCount--;
+        }
+        return;
+    }
+
     FINGER_STATE *finger = M_FindFinger(ev->fingerId);
     if (finger != nullptr) {
         finger->active = false;
@@ -552,6 +661,19 @@ static void M_HandleFingerUp(const SDL_TouchFingerEvent *const ev)
 }
 
 // --- Public API ---
+
+bool TouchOverlay_HasAnyFingerDown(void)
+{
+    if (m_SelectionMode) {
+        return m_SelectionFingerCount > 0;
+    }
+    for (int32_t i = 0; i < MAX_FINGERS; i++) {
+        if (m_Fingers[i].active) {
+            return true;
+        }
+    }
+    return false;
+}
 
 void TouchOverlay_Init(void)
 {
@@ -576,11 +698,11 @@ void TouchOverlay_SetVisible(const bool visible)
 {
     m_Visible = visible;
     if (!visible) {
-        // Release all touch state
+        // Release all touch position states
         M_ResetDpad();
         for (int32_t i = 0; i < m_NumButtons; i++) {
             if (!m_Buttons[i].is_dpad) {
-                Touch_SetState(m_Buttons[i].role, false);
+                Touch_SetPositionState(m_Buttons[i].def_index + 3, false);
             }
             m_Buttons[i].active = false;
         }
@@ -637,4 +759,82 @@ bool TouchOverlay_ProcessEvent(const SDL_Event *const event)
     default:
         return false;
     }
+}
+
+// --- Position system API ---
+
+int32_t TouchOverlay_GetPositionCount(void)
+{
+    return NUM_POSITIONS;
+}
+
+uint8_t TouchOverlay_GetPositionEngineMask(const int32_t position)
+{
+    if (position < 0 || position >= NUM_POSITIONS) {
+        return 0;
+    }
+    if (position < TOUCH_POS_BUTTON_BASE) {
+        // D-pad directions inherit the D-pad's engine mask
+        return m_ButtonDefs[0].engine_mask;
+    }
+    // Non-dpad: def_index = position - 3 (positions 4+ map to defs 1+)
+    const int32_t def_idx = position - 3;
+    if (def_idx < 0 || def_idx >= (int32_t)NUM_BUTTON_DEFS) {
+        return 0;
+    }
+    return m_ButtonDefs[def_idx].engine_mask;
+}
+
+INPUT_ROLE TouchOverlay_GetPositionDefaultRole(const int32_t position)
+{
+    if (position < 0 || position >= NUM_POSITIONS) {
+        return (INPUT_ROLE)-1;
+    }
+    switch (position) {
+    case TOUCH_POS_DPAD_UP:    return INPUT_ROLE_UP;
+    case TOUCH_POS_DPAD_DOWN:  return INPUT_ROLE_DOWN;
+    case TOUCH_POS_DPAD_LEFT:  return INPUT_ROLE_LEFT;
+    case TOUCH_POS_DPAD_RIGHT: return INPUT_ROLE_RIGHT;
+    default: {
+        const int32_t def_idx = position - 3;
+        if (def_idx >= 1 && def_idx < (int32_t)NUM_BUTTON_DEFS) {
+            return m_ButtonDefs[def_idx].role;
+        }
+        return (INPUT_ROLE)-1;
+    }
+    }
+}
+
+const char *TouchOverlay_GetPositionName(const int32_t position)
+{
+    if (position < 0 || position >= NUM_POSITIONS) {
+        return nullptr;
+    }
+    return m_PosNames[position];
+}
+
+// --- Selection mode API ---
+
+void TouchOverlay_EnterSelectionMode(void)
+{
+    m_SelectionMode = true;
+    m_SelectedPosition = -1;
+    m_SelectionFingerCount = 0;
+    m_WasVisibleBeforeSelection = m_Visible;
+    m_Visible = true;
+    M_ComputeButtonLayout();
+}
+
+void TouchOverlay_ExitSelectionMode(void)
+{
+    m_SelectionMode = false;
+    m_SelectedPosition = -1;
+    m_Visible = m_WasVisibleBeforeSelection;
+}
+
+int32_t TouchOverlay_GetSelectedPosition(void)
+{
+    const int32_t pos = m_SelectedPosition;
+    m_SelectedPosition = -1;
+    return pos;
 }
