@@ -253,7 +253,9 @@ static void M_FastFall(ITEM *const item, COLL_INFO *const coll)
 
 static void M_Zipline(ITEM *const item, COLL_INFO *const coll)
 {
-    g_Camera.target_angle = M_CAM_ZIPLINE_ANGLE;
+    if (!g_Config.gameplay.enable_modern_controls) {
+        g_Camera.target_angle = M_CAM_ZIPLINE_ANGLE;
+    }
 
     if (!g_Input.action) {
         item->goal_anim_state = LS(LS_JUMP_FORWARD);

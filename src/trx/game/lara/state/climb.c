@@ -31,8 +31,10 @@ static void M_Hang(ITEM *const item, COLL_INFO *const coll)
 
     coll->enable_hit = 0;
     coll->enable_baddie_push = 0;
-    g_Camera.target_angle = M_CAM_HANG_ANGLE;
-    g_Camera.target_elevation = M_CAM_HANG_ELEVATION;
+    if (!g_Config.gameplay.enable_modern_controls) {
+        g_Camera.target_angle = M_CAM_HANG_ANGLE;
+        g_Camera.target_elevation = M_CAM_HANG_ELEVATION;
+    }
     if (g_Input.left || g_Input.step_left) {
         item->goal_anim_state = LS(LS_SHIMMY_LEFT);
     } else if (g_Input.right || g_Input.step_right) {
@@ -44,8 +46,10 @@ static void M_Shimmy(ITEM *const item, COLL_INFO *const coll)
 {
     coll->enable_hit = 0;
     coll->enable_baddie_push = 0;
-    g_Camera.target_angle = M_CAM_HANG_ANGLE;
-    g_Camera.target_elevation = M_CAM_HANG_ELEVATION;
+    if (!g_Config.gameplay.enable_modern_controls) {
+        g_Camera.target_angle = M_CAM_HANG_ANGLE;
+        g_Camera.target_elevation = M_CAM_HANG_ELEVATION;
+    }
 
     const bool stop = item->current_anim_state == LS(LS_SHIMMY_LEFT)
         ? (!g_Input.left && !g_Input.step_left)

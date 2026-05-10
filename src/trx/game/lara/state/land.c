@@ -702,7 +702,9 @@ static void M_Slide(ITEM *const item, COLL_INFO *const coll)
     bool opposite_input;
     if (sliding_forward) {
         g_Camera.flags = CF_NO_CHUNKY;
-        g_Camera.target_elevation = M_CAM_SLIDE_ELEVATION;
+        if (!g_Config.gameplay.enable_modern_controls) {
+            g_Camera.target_elevation = M_CAM_SLIDE_ELEVATION;
+        }
         opposite_input = g_Input.back;
     } else {
         opposite_input = g_Input.forward;
@@ -750,9 +752,11 @@ static void M_PPReady(ITEM *const item, COLL_INFO *const coll)
 static void M_Pickup(ITEM *const item, COLL_INFO *const coll)
 {
     M_Default(item, coll);
-    g_Camera.target_angle = M_CAM_PICKUP_ANGLE;
-    g_Camera.target_elevation = M_CAM_PICKUP_ELEVATION;
-    g_Camera.target_distance = M_CAM_PICKUP_DISTANCE;
+    if (!g_Config.gameplay.enable_modern_controls) {
+        g_Camera.target_angle = M_CAM_PICKUP_ANGLE;
+        g_Camera.target_elevation = M_CAM_PICKUP_ELEVATION;
+        g_Camera.target_distance = M_CAM_PICKUP_DISTANCE;
+    }
 
     if (item->current_anim_state == LS(LS_FLARE_PICKUP)
         && Item_TestFrameEqual(item, -1)) {

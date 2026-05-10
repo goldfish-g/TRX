@@ -27,6 +27,10 @@ static const double m_ManualCameraMultiplier[11] = {
 
 static bool m_IsChunky = false;
 static bool m_LastInputWasMouse = false;
+// Deferred re-sync of modern_cam_angle: true when a non-chase → chase
+// transition was suppressed because the player was actively moving.
+// Applied once magnitude returns to 0 so the basis doesn't snap mid-run.
+static bool m_PendingModernResync = false;
 
 #define M_ROLL_ARC_PULL 40 // % to reduce distance at arc midpoint
 static bool m_IsInitialised = false;
@@ -208,11 +212,19 @@ void Camera_Update(void)
     if (g_Camera.type != CAM_HEAVY || g_Camera.timer == -1) {
         // Re-sync modern camera angle when returning to chase mode
         // from fixed/look/combat cameras to prevent snapping.
+        // If the player is actively moving, defer the re-sync so the
+        // movement axis stays put — the snap would otherwise rotate the
+        // input frame under their thumb mid-run.
         if (g_Config.gameplay.enable_modern_controls
             && g_Camera.type != CAM_CHASE) {
-            g_Camera.modern_cam_angle = Math_Atan(
-                g_Camera.target.z - g_Camera.pos.z,
-                g_Camera.target.x - g_Camera.pos.x);
+            if (g_AnalogInput.magnitude == 0) {
+                g_Camera.modern_cam_angle = Math_Atan(
+                    g_Camera.target.z - g_Camera.pos.z,
+                    g_Camera.target.x - g_Camera.pos.x);
+                m_PendingModernResync = false;
+            } else {
+                m_PendingModernResync = true;
+            }
         }
         g_Camera.type = CAM_CHASE;
         g_Camera.num = NO_CAMERA;
@@ -311,6 +323,18 @@ static void M_ProcessStick(
 void Camera_MoveModern(void)
 {
     M_EnsureMouseCaptured(true);
+
+    // Apply a deferred re-sync the moment the player releases the stick:
+    // a non-chase → chase transition during active movement skipped its
+    // re-sync to preserve the world-direction Lara was running in. When
+    // the stick returns to neutral, anchor the basis to the current
+    // chase camera so the next stick press uses an up-to-date frame.
+    if (m_PendingModernResync && g_AnalogInput.magnitude == 0) {
+        g_Camera.modern_cam_angle = Math_Atan(
+            g_Camera.target.z - g_Camera.pos.z,
+            g_Camera.target.x - g_Camera.pos.x);
+        m_PendingModernResync = false;
+    }
 
     const int16_t camera_speed = (int32_t)(DEG_90 / LOGIC_FPS)
         * (double)m_ManualCameraMultiplier[g_Config.gameplay.camera_speed];
