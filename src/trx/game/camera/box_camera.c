@@ -594,7 +594,14 @@ static void M_Chase(const ITEM *const item)
         } else if (speed > 4) {
             speed = 4;
         }
-        LOS_Check(&g_Camera.target, &target, false);
+        // LS_WATER_OUT crosses the ledge/water boundary mid-climbout, and
+        // both LOS_Check and M_SmartShift clip the camera in toward Lara
+        // as the line-of-sight catches the ledge edge — that's the "zoom
+        // in and out" oscillation. Skip clipping for this brief animation
+        // and let M_Move lerp to the raw orbit target.
+        if (item->current_anim_state != LS(LS_WATER_OUT)) {
+            LOS_Check(&g_Camera.target, &target, false);
+        }
         M_Move(&target, speed);
     } else {
         M_SmartShift(&target, M_Shift);

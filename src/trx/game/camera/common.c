@@ -459,9 +459,19 @@ void Camera_MoveModern(void)
     // proportional creep so the camera follows even after Lara has
     // finished turning. turn_rate component gives responsive following
     // during active turns.
-    if (Lara_GetItem()->speed > 0 && !m_LastInputWasMouse
-        && g_AnalogCamInput.stick_x == 0 && g_AnalogCamInput.stick_y == 0) {
-        const LARA_INFO *const lara = Lara_GetLaraInfo();
+    // Underwater swim states have speed == 0 (motion comes from
+    // fall_speed via animation translation), so we'd lose camera
+    // tracking; gate on Lara's water_status instead. Use water_status
+    // (not g_Camera.underwater): the room can still be flagged
+    // underwater during LS_WATER_OUT after Lara has already transitioned
+    // to LWS_ABOVE_WATER and her rot.y snaps to a cardinal direction,
+    // which otherwise yanks the camera mid-climbout.
+    const LARA_INFO *const lara = Lara_GetLaraInfo();
+    const bool in_swim_state = lara->water_status == LWS_UNDERWATER
+        || lara->water_status == LWS_SURFACE;
+    if ((Lara_GetItem()->speed > 0 || in_swim_state)
+        && !m_LastInputWasMouse && g_AnalogCamInput.stick_x == 0
+        && g_AnalogCamInput.stick_y == 0) {
         const int16_t cam_delta =
             Lara_GetItem()->rot.y - g_Camera.modern_cam_angle;
         int16_t step = lara->turn_rate / 3;

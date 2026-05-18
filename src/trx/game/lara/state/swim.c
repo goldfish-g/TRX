@@ -1,6 +1,8 @@
 #include <trx/config.h>
+#include <trx/core/utils.h>
 #include <trx/game/camera.h>
 #include <trx/game/input.h>
+#include <trx/game/input/analog.h>
 #include <trx/game/lara.h>
 #include <trx/game/lara/modern.h>
 #include <trx/game/lara/util.h>
@@ -13,8 +15,66 @@
 #define M_MAX_SWIM_SPEED 200
 // clang-format on
 
+// Camera-relative underwater aim, modeled on the remaster's
+// ModernControlsSwim: the stick picks a world-direction, Lara rotates
+// toward it, and pitch tracks the camera elevation. Two differences:
+//   - We rate-cap rot.y at LARA_MED_TURN/frame (the original engine's
+//     underwater yaw cap). The remaster snaps instantly; TRX won't allow
+//     turn rates that weren't possible in the original.
+//   - Returns true while modern controls are engaged so the legacy
+//     classic turn doesn't also run.
+// Lean is always zeroed — matches remaster behavior.
+static bool M_SwimTurnModern(ITEM *const item)
+{
+    if (!g_Config.gameplay.enable_modern_controls) {
+        return false;
+    }
+
+    // While modern is on, suppress classic turn handling regardless of
+    // whether the stick is currently held — releasing the stick should
+    // leave Lara coasting, not snap into classic turn-by-digital-input.
+    item->rot.z = 0;
+
+    if (g_AnalogInput.magnitude == 0) {
+        return true;
+    }
+
+    const int32_t target_yaw32 = Lara_ModernGetTargetAngle();
+    if (target_yaw32 == MODERN_ANGLE_NONE) {
+        return true;
+    }
+
+    const int16_t target_yaw = (int16_t)target_yaw32;
+    const int16_t yaw_delta = target_yaw - item->rot.y;
+    if (yaw_delta > LARA_MED_TURN) {
+        item->rot.y += LARA_MED_TURN;
+    } else if (yaw_delta < -LARA_MED_TURN) {
+        item->rot.y -= LARA_MED_TURN;
+    } else {
+        item->rot.y += yaw_delta;
+    }
+
+    // Pitch tracks camera elevation (right stick / mouse Y), same as
+    // remaster's separate-analog-field pitch source.
+    const int16_t target_pitch = g_Camera.additional_elevation;
+    const int16_t pitch_delta = target_pitch - item->rot.x;
+    if (pitch_delta > M_TURN_RATE) {
+        item->rot.x += M_TURN_RATE;
+    } else if (pitch_delta < -M_TURN_RATE) {
+        item->rot.x -= M_TURN_RATE;
+    } else {
+        item->rot.x += pitch_delta;
+    }
+
+    return true;
+}
+
 static void M_SwimTurn(ITEM *const item)
 {
+    if (M_SwimTurnModern(item)) {
+        return;
+    }
+
     if (g_Input.forward) {
         item->rot.x -= M_TURN_RATE;
     } else if (g_Input.back) {
@@ -47,6 +107,12 @@ static void M_SwimTurn(ITEM *const item)
     }
 }
 
+static bool M_StickActive(void)
+{
+    return g_Config.gameplay.enable_modern_controls
+        && g_AnalogInput.magnitude > 0;
+}
+
 static void M_Tread(ITEM *const item, COLL_INFO *const coll)
 {
     if (item->hit_points <= 0) {
@@ -66,8 +132,11 @@ static void M_Tread(ITEM *const item, COLL_INFO *const coll)
         Lara_Look_UpDown();
     }
 
+    // Modern controls: stick held → straight into LS_SWIM (the swim
+    // handler does the rotation each frame, rate-capped). This matches
+    // the remaster's tread behavior (stick = synthetic JUMP).
     M_SwimTurn(item);
-    if (g_Input.jump) {
+    if (g_Input.jump || M_StickActive()) {
         item->goal_anim_state = LS(LS_SWIM);
     }
     item->fall_speed -= M_FRICTION;
@@ -103,7 +172,7 @@ static void M_Swim(ITEM *const item, COLL_INFO *const coll)
         CLAMPG(item->fall_speed, M_MAX_SWIM_SPEED);
     }
 
-    if (!g_Input.jump) {
+    if (!g_Input.jump && !M_StickActive()) {
         item->goal_anim_state =
             LS(g_Config.gameplay.enable_tr2_swim_cancel
                        && Lara_State_IsResponsive(LA_UNDERWATER_SWIM_FORWARD)
@@ -128,7 +197,7 @@ static void M_Glide(ITEM *item, COLL_INFO *coll)
     }
 
     M_SwimTurn(item);
-    if (g_Input.jump) {
+    if (g_Input.jump || M_StickActive()) {
         item->goal_anim_state = LS(LS_SWIM);
     }
     item->fall_speed -= M_FRICTION;
@@ -328,7 +397,19 @@ static void M_WaterOut(ITEM *const item, COLL_INFO *const coll)
 {
     coll->enable_hit = 0;
     coll->enable_baddie_push = 0;
-    g_Camera.flags = CF_FOLLOW_CENTRE;
+    if (g_Config.gameplay.enable_modern_controls) {
+        // The chase camera's vertical offset is target_distance *
+        // sin(target_elevation), and target_elevation comes from
+        // additional_elevation (right stick / mouse Y). Persistent
+        // pitch from underwater swim places the camera below Lara
+        // post-climbout — sometimes under the floor. Decay it toward
+        // level so the camera frames her normally on dry land. Use
+        // about 1/3 per frame so the level-out completes inside the
+        // ~1s climbout anim without an obvious pop.
+        g_Camera.additional_elevation -= g_Camera.additional_elevation / 3;
+    } else {
+        g_Camera.flags = CF_FOLLOW_CENTRE;
+    }
 }
 
 static void M_UWTwist(ITEM *const item, COLL_INFO *const coll)
