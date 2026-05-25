@@ -5,12 +5,11 @@
 #include <trx/game/viewport.h>
 #include <trx/gl/buffer.h>
 #include <trx/gl/context.h>
+#include <trx/gl/gl_webgl_compat.h>
 #include <trx/gl/program.h>
 #include <trx/gl/texture.h>
 #include <trx/gl/utils.h>
 #include <trx/gl/vertex_array.h>
-
-#include <GL/glew.h>
 
 void TRX_GL_FBO_Init(
     TRX_GL_FBO *const fbo, const int32_t width, const int32_t height,
@@ -50,7 +49,6 @@ void TRX_GL_FBO_Init(
         0);
     TRX_GL_CheckError();
 
-    // direct draw to color attachment 0.
     glDrawBuffer(GL_COLOR_ATTACHMENT0);
     TRX_GL_CheckError();
 

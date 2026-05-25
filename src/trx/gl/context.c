@@ -4,11 +4,11 @@
 #include <trx/core/memory.h>
 #include <trx/game/shell.h>
 #include <trx/game/viewport.h>
+#include <trx/gl/gl_webgl_compat.h>
 #include <trx/gl/renderer.h>
 #include <trx/gl/screenshot.h>
 #include <trx/gl/utils.h>
 
-#include <GL/glew.h>
 #include <SDL2/SDL_video.h>
 #include <string.h>
 
@@ -100,6 +100,7 @@ bool TRX_GL_Context_Attach(void *window_handle)
             "Can't activate OpenGL context: %s", SDL_GetError());
     }
 
+#ifndef EMSCRIPTEN_BUILD
     const GLenum err = glewInit();
     if (err != GLEW_OK) {
         if (err != 4) {
@@ -109,6 +110,7 @@ bool TRX_GL_Context_Attach(void *window_handle)
         // https://github.com/nigels-com/glew/issues/417
         LOG_WARNING("GLEW failed to init: %d", err);
     }
+#endif
 
     LOG_INFO("OpenGL vendor string:   %s", glGetString(GL_VENDOR));
     LOG_INFO("OpenGL renderer string: %s", glGetString(GL_RENDERER));
@@ -125,10 +127,16 @@ bool TRX_GL_Context_Attach(void *window_handle)
     glClearDepth(1);
     TRX_GL_CheckError();
 
-    // VSync defaults to on unless user disabled it in runtime json
+#ifndef EMSCRIPTEN_BUILD
+    // VSync defaults to on unless user disabled it in runtime json.
+    // On Emscripten the browser's requestAnimationFrame provides VSync
+    // natively, and SDL_GL_SetSwapInterval() requires a main loop
+    // registered via emscripten_set_main_loop() which hasn't been
+    // called yet at this point.
     SDL_GL_SetSwapInterval(1);
+#endif
 
-#if DEBUG
+#if DEBUG && !defined(EMSCRIPTEN_BUILD)
     if (glDebugMessageCallback != nullptr) {
         glDebugMessageCallback(M_GLDebug, nullptr);
     }
@@ -185,7 +193,14 @@ void TRX_GL_Context_SetLineWidth(const int32_t line_width)
 
 void TRX_GL_Context_SetVSync(bool vsync)
 {
+#ifndef EMSCRIPTEN_BUILD
     SDL_GL_SetSwapInterval(vsync);
+#else
+    // On Emscripten, VSync is controlled by the browser
+    // (requestAnimationFrame).  Calling SDL_GL_SetSwapInterval triggers
+    // emscripten_set_main_loop_timing which may not be available.
+    (void)vsync;
+#endif
 }
 
 void *TRX_GL_Context_GetWindowHandle(void)

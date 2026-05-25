@@ -7,7 +7,9 @@
 #include <trx/core/log.h>
 #include <trx/core/memory.h>
 #include <trx/core/virtual_file.h>
+#include <trx/core/webgl_log.h>
 #include <trx/debug.h>
+#include <trx/game/clock.h>
 #include <trx/game/creature.h>
 #include <trx/game/game_buf.h>
 #include <trx/game/game_flow.h>
@@ -308,13 +310,16 @@ bool Stats_GameHasCrystals(void)
 void Stats_CalculateMaxStats(void)
 {
     const GF_LEVEL_TABLE *const level_table = GF_GetLevelTable(GFLT_MAIN);
+    WEBGL_LOG("[WEBGL] Stats: enter, level_count=%d", level_table->count);
     M_EnsureStatsStorage(level_table->count);
     memset(m_Stats, 0, sizeof(LEVEL_MAX_STATS) * (size_t)m_StatsCapacity);
     m_GameHasCrystals = false;
 
     BENCHMARK benchmark = Benchmark_Start();
     const uint64_t expected_checksum = M_ComputeInputsChecksum(level_table);
+    WEBGL_LOG("[WEBGL] Stats: checksum computed, trying cache...");
     if (M_TryLoadCache(expected_checksum, level_table)) {
+        WEBGL_LOG("[WEBGL] Stats: cache HIT, skipping scan");
         goto finish;
     }
 
@@ -323,6 +328,10 @@ void Stats_CalculateMaxStats(void)
         if (level->type != GFL_NORMAL && level->type != GFL_BONUS) {
             continue;
         }
+
+        // Yield to the browser between level scans so the page stays
+        // responsive while scanning all level files. No-op on desktop.
+        Clock_Delay(0);
 
         VFILE *const file = VFile_CreateFromPath(level->path);
         if (file == nullptr) {
@@ -374,6 +383,7 @@ void Stats_CalculateMaxStats(void)
                 Lua_FireEventInt32(LUA_EVENT_AFTER_ITEM_SETUP, level->num);
 
                 Carrier_InitialiseLevel(level);
+
                 Stats_ScanLevel(level);
             }
             Inject_Cleanup();
@@ -396,7 +406,9 @@ void Stats_CalculateMaxStats(void)
 #endif
     }
 
+    WEBGL_LOG("[WEBGL] Stats: all levels scanned, writing cache...");
     M_WriteCache(expected_checksum, level_table);
+    WEBGL_LOG("[WEBGL] Stats: cache written");
 
 finish:
     for (int32_t i = 0; i < level_table->count; i++) {

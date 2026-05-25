@@ -3,6 +3,8 @@
 #include <trx/core/filesystem.h>
 #include <trx/core/log.h>
 #include <trx/core/memory.h>
+#include <trx/core/webgl_log.h>
+#include <trx/game/clock.h>
 #include <trx/game/inject.h>
 #include <trx/game/items/carrier.h>
 #include <trx/game/level.h>
@@ -60,6 +62,12 @@ static void M_InitialiseSamplesFromFile(
 
     for (int32_t i = 0, current_sample = 0; current_sample < sample_count;
          i++) {
+        // Yield periodically during sample loading (every 10 samples)
+        // to keep the browser responsive. No-op on desktop.
+        if (i > 0 && i % 10 == 0) {
+            Clock_Delay(0);
+        }
+
         uint32_t header[11] = {};
         File_ReadData(fp, header, 11 * sizeof(uint32_t));
         if (header[0] != MKTAG('R', 'I', 'F', 'F')
@@ -183,10 +191,21 @@ void Level_Pipeline_Load(const GF_LEVEL *const level)
     LOG_INFO("%d (%s)", level->num, level->path);
     BENCHMARK benchmark = Benchmark_Start();
 
+    // Yield to the browser before heavy file I/O and parsing to prevent
+    // the event loop from being starved. No-op on desktop.
+    WEBGL_LOG(
+        "[WEBGL] Level_Pipeline_Load: yielding before load (level=%d, path=%s)",
+        level->num, level->path ? level->path : "(null)");
+    Clock_Delay(0);
+    WEBGL_LOG("[WEBGL] Level_Pipeline_Load: resumed, loading file...");
+
     Inject_InitLevel(level, INJECTION_MODE_FULL);
     const LEVEL_FORMAT_LOADER *const loader = Level_Format_LoadFromFile(level);
     M_CompleteSetup(loader, level);
     Inject_Cleanup();
 
+#ifdef EMSCRIPTEN_BUILD
+    emscripten_log(0x02, "[WEBGL] Level_Pipeline_Load: complete");
+#endif
     Benchmark_End(&benchmark, nullptr);
 }

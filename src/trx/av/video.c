@@ -1625,6 +1625,12 @@ static int M_StreamComponentOpen(M_STATE *is, int stream_index)
     avctx->codec_id = codec->id;
     avctx->lowres = 0;
 
+    if (codec->capabilities
+        & (AV_CODEC_CAP_FRAME_THREADS | AV_CODEC_CAP_SLICE_THREADS)) {
+        avctx->thread_count = 2;
+        avctx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+    }
+
     if ((ret = avcodec_open2(avctx, codec, nullptr)) < 0) {
         goto fail;
     }

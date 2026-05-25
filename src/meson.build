@@ -16,6 +16,11 @@ staticdeps = get_option('staticdeps')
 if host_machine.system() == 'darwin'
   staticdeps = false
 endif
+# Emscripten provides dependencies via ports; never use static linking mode
+is_emscripten = (host_machine.system() == 'emscripten')
+if is_emscripten
+  staticdeps = false
+endif
 
 c_compiler = meson.get_compiler('c')
 git = find_program('git', required: true)
@@ -68,6 +73,7 @@ common_build_opts = [
   '-DDEBUG=' + (get_option('buildtype') == 'debug' ? '1' : '0'),
 ]
 
+
 # Some warning names are compiler-specific (e.g. Clang-only) and will spam notes
 # on GCC. Only add the ones the current compiler actually supports.
 compiler_specific_warning_opts = [
@@ -84,25 +90,48 @@ build_opts = (
 add_project_arguments(build_opts, language: 'c')
 
 null_dep = dependency('', required: false)
-dep_avcodec = dependency('libavcodec', static: staticdeps)
-dep_avformat = dependency('libavformat', static: staticdeps)
-dep_avutil = dependency('libavutil', static: staticdeps)
-dep_sdl2 = dependency('SDL2', static: staticdeps)
-dep_glew = dependency('glew', static: staticdeps)
-dep_pcre2 = dependency('libpcre2-8', static: staticdeps)
-dep_backtrace = c_compiler.find_library('backtrace', static: true, required: false)
-dep_swscale = dependency('libswscale', static: staticdeps)
-dep_swresample = dependency('libswresample', static: staticdeps)
-dep_lua = dependency('lua', static: staticdeps)
-c_compiler.check_header('uthash.h', required: true)
-dep_mathlibrary = c_compiler.find_library('m', static: staticdeps, required: false)
+
+if is_emscripten
+  # Emscripten provides SDL2, zlib, GL ES3 via ports / built-in flags
+  # set in the cross file (emscripten_cross.ini).  Using null_dep avoids
+  # pkg-config picking up native system libraries.
+  dep_sdl2 = null_dep          # provided by -sUSE_SDL=2
+  dep_glew = null_dep          # GLEW is not needed; Emscripten provides GL ES3
+  dep_opengl = null_dep        # GL is linked implicitly via -sFULL_ES3
+  dep_avcodec = dependency('libavcodec', static: true)
+  dep_avformat = dependency('libavformat', static: true)
+  dep_avutil = dependency('libavutil', static: true)
+  dep_swscale = dependency('libswscale', static: true)
+  dep_swresample = dependency('libswresample', static: true)
+  dep_backtrace = null_dep
+  dep_zlib = null_dep          # provided by -sUSE_ZLIB=1
+  dep_pcre2 = null_dep
+  dep_lua = dependency('lua', static: true)
+  dep_mathlibrary = null_dep   # Emscripten bundles libm
+  c_compiler.check_header('uthash.h', required: true)
+else
+  dep_avcodec = dependency('libavcodec', static: staticdeps)
+  dep_avformat = dependency('libavformat', static: staticdeps)
+  dep_avutil = dependency('libavutil', static: staticdeps)
+  dep_sdl2 = dependency('SDL2', static: staticdeps)
+  dep_glew = dependency('glew', static: staticdeps)
+  dep_pcre2 = dependency('libpcre2-8', static: staticdeps)
+  dep_backtrace = c_compiler.find_library('backtrace', static: true, required: false)
+  dep_swscale = dependency('libswscale', static: staticdeps)
+  dep_swresample = dependency('libswresample', static: staticdeps)
+  dep_lua = dependency('lua', static: staticdeps)
+  c_compiler.check_header('uthash.h', required: true)
+  dep_mathlibrary = c_compiler.find_library('m', static: staticdeps, required: false)
+endif
 
 dep_zlib = null_dep
-if not staticdeps
+if not staticdeps and not is_emscripten
   dep_zlib = dependency('zlib', static: staticdeps)
 endif
 
-if host_machine.system() == 'windows'
+if is_emscripten
+  dep_opengl = null_dep
+elif host_machine.system() == 'windows'
   dep_opengl = c_compiler.find_library('opengl32')
 else
   dep_opengl = dependency('GL')
@@ -124,13 +153,17 @@ dependencies = [
   dep_zlib,
 ]
 
-common_sources = [
-  'trx/av/audio.c',
-  'trx/av/audio_reverb.c',
+desktop_sources = [
   'trx/av/audio_sample.c',
   'trx/av/audio_stream.c',
   'trx/av/image.c',
   'trx/av/video.c',
+  'trx/game/fmv.c',
+]
+
+common_sources = [
+  'trx/av/audio.c',
+  'trx/av/audio_reverb.c',
   'trx/config/common.c',
   'trx/config/dynamic_enum.c',
   'trx/config/enum.c',
@@ -235,7 +268,6 @@ common_sources = [
   'trx/game/enum.c',
   'trx/game/events.c',
   'trx/game/fader.c',
-  'trx/game/fmv.c',
   'trx/game/fx/common.c',
   'trx/game/fx/explosion_ring.c',
   'trx/game/fx/footprint.c',
@@ -798,21 +830,77 @@ common_sources = [
 ]
 
 
-if dep_backtrace.found() and host_machine.system() == 'linux'
-  common_sources += ['trx/core/log_linux.c']
-elif host_machine.system() == 'windows'
-  common_sources += ['trx/core/log_windows.c']
-  dwarfstack = subproject('dwarfstack', default_options: ['warning_level=0'])
-  dep_dwarfstack = dwarfstack.get_variable('dep_dwarfstack')
-  dep_dbghelp = c_compiler.find_library('dbghelp')
-  dependencies += [dep_dbghelp, dep_dwarfstack]
+common_sources += desktop_sources
+
+if is_emscripten
+  common_sources += ['trx/core/log_emscripten.c']
+  common_sources += ['trx/gl/gl_webgl_compat.c']
+  common_sources += ['trx/game/shell/flow_emscripten.c']
+  common_sources += ['trx/game/clock/delay_emscripten.c']
 else
-  common_sources += ['trx/core/log_unknown.c']
+  common_sources += ['trx/game/shell/flow_generic.c']
+  common_sources += ['trx/game/clock/delay_generic.c']
+  if dep_backtrace.found() and host_machine.system() == 'linux'
+    common_sources += ['trx/core/log_linux.c']
+  elif host_machine.system() == 'windows'
+    common_sources += ['trx/core/log_windows.c']
+    dwarfstack = subproject('dwarfstack', default_options: ['warning_level=0'])
+    dep_dwarfstack = dwarfstack.get_variable('dep_dwarfstack')
+    dep_dbghelp = c_compiler.find_library('dbghelp')
+    dependencies += [dep_dbghelp, dep_dwarfstack]
+  else
+    common_sources += ['trx/core/log_unknown.c']
+  endif
 endif
 
 link_args = []
 if host_machine.system() == 'windows'
   link_args += ['-static']
+elif is_emscripten
+  link_args += [
+    '-pthread',
+    '-sPTHREAD_POOL_SIZE=6',
+    '-sUSE_SDL=2',
+    '-sUSE_ZLIB=1',
+    '-sFULL_ES3=1',
+    '-sALLOW_MEMORY_GROWTH=1',
+    '-sINITIAL_MEMORY=268435456',
+    '-sSTACK_SIZE=2097152',
+    '-sASYNCIFY',
+    '-sASYNCIFY_STACK_SIZE=131072',
+    # ASYNCIFY cannot trace through function pointers (indirect calls).
+    # We must explicitly list every function on the call path between
+    # main() and emscripten_sleep().  The chain goes through multiple
+    # levels of function-pointer dispatch:
+    #   main → Shell_Main → GF_Do*Sequence → GF_InterpretSequence
+    #   → M_RunEvent → event_handler [fnptr] → GF_Run*/GF_Show*
+    #   → PhaseExecutor_Run → phase->start/control/draw [fnptr]
+    #   → Clock_WaitTick → emscripten_sleep
+    # Level loading also yields:
+    #   GF_InterpretSequence → Level_Initialise → Level_Pipeline_Load
+    #   → emscripten_sleep  (before heavy I/O)
+    #   → M_CompleteSetup → M_InitialiseSamplesFromFile → emscripten_sleep
+    # FMV playback also yields (FFmpeg video decoding runs in worker
+    # threads; only the main-thread pump needs ASYNCIFY):
+    #   M_HandlePlayFMV → FMV_Play → M_Play → Video_PumpEvents
+    #   → emscripten_sleep
+    '-sASYNCIFY_ADD=["main","Shell_Main","Shell_InitIDBFS","Shell_WaitForUserInput","Shell_ShowProfileSelector","Shell_LoadModGameData","GF_DoFrontendSequence","GF_DoLevelSequence","GF_DoCutsceneSequence","GF_DoDemoSequence","GF_PlayAvailableStory","GF_InterpretSequence","*M_RunEvent*","*M_HandleExitToTitle*","*M_HandleLevelComplete*","*M_HandlePlayLevel*","*M_HandlePlayCutscene*","*M_HandlePlayFMV*","*M_HandlePlayMusic*","*M_HandlePicture*","*M_HandleInventoryModifier*","*M_HandleLevelStats*","*M_HandleTotalStats*","*M_HandleGlobeSelect*","*M_HandleSetStartAnim*","*M_HandleEnableSunset*","*M_HandleSetupBaconLara*","*M_HandleDisableFloor*","GF_RunTitle","GF_RunGame","GF_ShowInventory","GF_ShowInventoryKeys","GF_RunDemo","GF_RunCutscene","GF_RunGlobeSelect","GF_EnterPhotoMode","GF_PauseGame","PhaseExecutor_Run","*M_RunFadeToBlackTransition*","*M_DrawFadeToBlackTransition*","Clock_WaitTick","Game_ProcessInput","Stats_CalculateMaxStats","Level_Initialise","Level_Pipeline_Load","FMV_Play","Video_PumpEvents","*M_Play*","*M_CompleteSetup*","*M_InitialiseSamplesFromFile*","*M_LoadFromFile*","*M_Control*","*M_Draw*","*M_Start*","*M_Resume*","*M_Suspend*","*M_End*","*M_HandleOverride*","*M_RequestFadeToBlack*","*M_UsesCrossFadeIn*","*Game_Control*"]',
+    '-sENVIRONMENT=web',
+    '-sMODULARIZE=1',
+    '-sEXPORT_NAME=TRX',
+    '-sEXIT_RUNTIME=1',
+    '-sEXPORTED_RUNTIME_METHODS=["callMain","FS","UTF8ToString","stringToUTF8","setValue","ccall","cwrap"]',
+    '-sEXPORTED_FUNCTIONS=["_main","_trx_get_version"]',
+    '-lidbfs.js',
+  ]
+
+  # Preload the VFS staging directory into the Emscripten virtual filesystem.
+  # The build script creates this directory with the games/ layout containing
+  # ship config, ship data, and optionally bundled user game data.
+  vfs_stage = get_option('webgl_vfs_stage')
+  if vfs_stage != ''
+    link_args += ['--preload-file', vfs_stage + '@/']
+  endif
 endif
 
 
@@ -851,6 +939,11 @@ endif
 
 trx_sources = common_sources + [trx_init, trx_resources, trx_lua_embed]
 
+trx_name_suffix = []
+if is_emscripten
+  trx_name_suffix = 'js'
+endif
+
 executable(
   'TRX',
   trx_sources,
@@ -860,6 +953,7 @@ executable(
   install: true,
   install_tag: 'common',
   c_args: ['-I.'],
+  name_suffix: trx_name_suffix,
 )
 
 if host_machine.system() == 'darwin'

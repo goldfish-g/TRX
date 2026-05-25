@@ -1,6 +1,7 @@
 #include <trx/config.h>
 #include <trx/core/log.h>
 #include <trx/core/memory.h>
+#include <trx/core/webgl_log.h>
 #include <trx/game/demo.h>
 #include <trx/game/game.h>
 #include <trx/game/game_flow/common.h>
@@ -17,12 +18,15 @@
 
 GF_COMMAND GF_RunTitle(void)
 {
+    WEBGL_LOG("[WEBGL] GF_RunTitle: initialising title level...");
     Savegame_UnbindSlot();
     GameStringTable_Apply(nullptr);
     const GF_LEVEL *const title_level = GF_GetTitleLevel();
     if (!Level_Initialise(title_level, GFSC_NORMAL)) {
+        WEBGL_LOG("[WEBGL] GF_RunTitle: Level_Initialise FAILED");
         return (GF_COMMAND) { .action = GF_EXIT_GAME };
     }
+    WEBGL_LOG("[WEBGL] GF_RunTitle: showing inventory (title mode)...");
     return GF_ShowInventory(INV_TITLE_MODE);
 }
 

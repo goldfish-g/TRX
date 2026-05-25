@@ -462,7 +462,7 @@ static void M_PrepareEnvMap(void)
 
         glBindTexture(GL_TEXTURE_2D, m_Priv.tex_env_map);
         glTexImage2D(
-            GL_TEXTURE_2D, 0, GL_RGB, pattern_size, pattern_size, 0, GL_RGB,
+            GL_TEXTURE_2D, 0, GL_RGB8, pattern_size, pattern_size, 0, GL_RGB,
             GL_UNSIGNED_BYTE, test_pattern);
         TRX_GL_CheckError();
         Memory_FreePointer(&test_pattern);
@@ -620,7 +620,7 @@ void Output_Textures_UpdateEnvironmentMap(void)
     const int32_t h = side;
 
     glBindTexture(GL_TEXTURE_2D, m_Priv.tex_env_map);
-    glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, x, y, w, h, 0);
+    glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, x, y, w, h, 0);
     TRX_GL_CheckError();
 }
 

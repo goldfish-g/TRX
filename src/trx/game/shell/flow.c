@@ -5,6 +5,7 @@
 #include <trx/core/memory.h>
 #include <trx/core/strings.h>
 #include <trx/core/utils.h>
+#include <trx/core/webgl_log.h>
 #include <trx/debug.h>
 #include <trx/game/catalog/manager.h>
 #include <trx/game/clock.h>
@@ -47,6 +48,7 @@
 
 #include <SDL2/SDL.h>
 #include <stdio.h>
+#include <string.h>
 
 static SHELL_SESSION *m_Session = nullptr;
 static SDL_Window *m_Window = nullptr;
@@ -61,10 +63,13 @@ static void M_CreateGameWindow(void)
     if (m_Window != nullptr) {
         return; // Window persists across mod switches
     }
+
+    const uint32_t window_flags = SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE
+        | SDL_WINDOW_OPENGL | Shell_GetWindowExtraFlags();
+
     m_Window = SDL_CreateWindow(
         "TRX", g_Config.window.x, g_Config.window.y, g_Config.window.width,
-        g_Config.window.height,
-        SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
+        g_Config.window.height, window_flags);
 
     if (m_Window == nullptr) {
         Shell_ExitSystemFmt("Failed to create SDL window: %s", SDL_GetError());
@@ -77,10 +82,8 @@ static void M_CreateGLContext(void)
     if (TRX_GL_Context_GetWindowHandle() != nullptr) {
         return; // GL context persists across mod switches
     }
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(
-        SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+
+    Shell_SetupGLContextVersion();
     if (!TRX_GL_Context_Attach(m_Window)) {
         Shell_ExitSystem("System Error: cannot attach opengl context");
     }
@@ -111,6 +114,7 @@ static void M_SetupSDL(void)
     if (SDL_Init(SDL_INIT_EVENTS | SDL_INIT_VIDEO) < 0) {
         Shell_ExitSystemFmt("Cannot initialize SDL: %s", SDL_GetError());
     }
+    Shell_PostSDLInit();
 }
 
 static void M_SetupGL(void)
@@ -334,13 +338,16 @@ int32_t Shell_Main(const SHELL_ARGS *const args)
 
     LOG_INFO("Game directory: %s", TRXPath_Get(TRX_PATH_TRX_DIR));
 
+    WEBGL_LOG("[WEBGL] Shell_Main: initializing modules...");
     M_InitModules();
+    Shell_InitIDBFS();
     M_PrepareSystem();
     if (s->args->mod == nullptr) {
         Shell_ExitSystem("No --mod specified.");
         return 1;
     }
     TRXPath_Init(s->args);
+    WEBGL_LOG("[WEBGL] Shell_Main: creating window and GL context...");
     M_CreateGameWindow();
     M_CreateGLContext();
     Output_Init();
@@ -348,6 +355,7 @@ int32_t Shell_Main(const SHELL_ARGS *const args)
         M_ShowWindow();
     }
 
+    WEBGL_LOG("[WEBGL] Shell_Main: loading game flow...");
     GF_Init();
     GF_LoadFromFile(Shell_GetGameFlowPath(s->args->mod));
 
@@ -387,8 +395,14 @@ int32_t Shell_Main(const SHELL_ARGS *const args)
         Lua_FreeResult(&res);
     }
 
+    WEBGL_LOG("[WEBGL] Shell_Main: calculating max stats...");
     Stats_CalculateMaxStats();
+    WEBGL_LOG("[WEBGL] Shell_Main: max stats done, starting frontend...");
+    Shell_WaitForUserInput();
+    LOG_INFO("[WEBGL] Starting frontend sequence...");
     GF_COMMAND gf_cmd = GF_DoFrontendSequence();
+    WEBGL_LOG("[WEBGL] Shell_Main: frontend returned action=%d", gf_cmd.action);
+    LOG_INFO("[WEBGL] Frontend sequence returned action=%d", gf_cmd.action);
 
     bool loop_continue = !Shell_IsExiting();
     while (loop_continue) {
@@ -461,7 +475,25 @@ int32_t Shell_Main(const SHELL_ARGS *const args)
             }
             break;
 
-        case GF_EXIT_GAME:
+        case GF_EXIT_GAME: {
+            char mod_buf[32] = { 0 };
+            int32_t engine = 0;
+            Shell_ShowProfileSelector(mod_buf, sizeof(mod_buf), &engine);
+            if (mod_buf[0] != '\0') {
+                if (strcmp(mod_buf, s->args->mod->name) == 0) {
+                    // Same mod selected — just restart the title screen
+                    // rather than tearing down and reinitializing the
+                    // engine, which would fail (e.g. IDBFS double-mount).
+                    gf_cmd = (GF_COMMAND) { .action = GF_EXIT_TO_TITLE };
+                    break;
+                }
+                Shell_RequestModSwitch(mod_buf);
+                gf_cmd.action = GF_SWITCH_MOD;
+            }
+            loop_continue = false;
+            break;
+        }
+
         case GF_SWITCH_MOD:
             loop_continue = false;
             break;

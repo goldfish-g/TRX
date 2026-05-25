@@ -2,6 +2,7 @@
 
 #include <trx/config.h>
 #include <trx/core/benchmark.h>
+#include <trx/core/webgl_log.h>
 #include <trx/game/clock.h>
 #include <trx/game/console/common.h>
 #include <trx/game/fader.h>
@@ -25,6 +26,7 @@
 #define M_MAX_PHASES 10
 
 static int32_t m_CurrentFrame = 0;
+static int32_t m_FrameLog = 0;
 static bool m_Exiting;
 static FADER m_ExitFader;
 static int32_t m_PhaseStackSize = 0;
@@ -214,6 +216,7 @@ static void M_Draw(PHASE *const phase)
 
 GF_COMMAND PhaseExecutor_Run(PHASE *const phase)
 {
+    WEBGL_LOG("[WEBGL] PhaseExecutor_Run entered, stack=%d", m_PhaseStackSize);
     GF_COMMAND gf_cmd = { .action = GF_NOOP };
     bool skip_fade_out = false;
 
@@ -243,9 +246,11 @@ GF_COMMAND PhaseExecutor_Run(PHASE *const phase)
     }
 
     if (phase->start != nullptr) {
+        WEBGL_LOG("[WEBGL] phase->start() calling...");
         Clock_SyncTick();
         g_OldInputDB = g_Input;
         const PHASE_CONTROL control = phase->start(phase);
+        WEBGL_LOG("[WEBGL] phase->start() returned action=%d", control.action);
         if (Shell_IsExiting()) {
             gf_cmd = (GF_COMMAND) { .action = GF_EXIT_GAME };
             goto finish;
@@ -259,9 +264,15 @@ GF_COMMAND PhaseExecutor_Run(PHASE *const phase)
         }
     }
 
+    WEBGL_LOG("[WEBGL] Entering main frame loop");
     while (true) {
         int32_t nframes = Clock_WaitTick();
+        if (m_FrameLog < 10 || m_FrameLog % 60 == 0) {
+            WEBGL_LOG("[WEBGL] frame=%d nframes=%d", m_FrameLog, nframes);
+        }
+        m_FrameLog++;
         int32_t frame = 0;
+        int no_wait_count = 0;
         while (true) {
             const PHASE_CONTROL control = M_Control(phase);
             if (control.action == PHASE_ACTION_END) {
@@ -280,6 +291,12 @@ GF_COMMAND PhaseExecutor_Run(PHASE *const phase)
                 }
                 goto finish;
             } else if (control.action == PHASE_ACTION_NO_WAIT) {
+                // Prevent infinite spin without yielding to browser.
+                // On desktop this is a no-op.
+                if (++no_wait_count > 1000) {
+                    Clock_Delay(0);
+                    no_wait_count = 0;
+                }
                 continue;
             }
 

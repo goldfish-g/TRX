@@ -1,6 +1,6 @@
 #pragma once
 
-#include <GL/glew.h>
+#include <trx/gl/gl_webgl_compat.h>
 
 typedef struct OUTPUT_SHADER OUTPUT_SHADER;
 

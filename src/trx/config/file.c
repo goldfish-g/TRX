@@ -10,6 +10,7 @@
 #include <trx/core/vector.h>
 #include <trx/debug.h>
 #include <trx/game/console/history.h>
+#include <trx/game/shell.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -241,6 +242,9 @@ bool ConfigFile_Write(const CONFIG_IO_ARGS *const args)
 
     JSON_VALUE *const new_root = JSON_ValueFromObject(root_obj);
     const bool updated = JSONFile_Write(args->default_path, new_root);
+    if (updated) {
+        Shell_PersistConfigToIDBFS();
+    }
 
     JSON_ValueFree(new_root);
     return updated;

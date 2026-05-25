@@ -112,6 +112,7 @@ Showcase: https://youtu.be/L1g4tavx23Y
 ## [1.6](https://github.com/LostArtefacts/TRX/compare/trx-1.5...trx-1.6) - 2026-05-02
 Showcase: https://youtu.be/yTW99iecK3U
 - added on-screen touch controls with a virtual D-pad and action buttons, configurable opacity/scale/deadzone, dynamic button glyphs, and full remap support including button macros (Gameplay Options → Controls → Touch controls)
+- changed the WebGL build into a headless WASM engine + JS loader consumed via a promise-based adapter contract; the bundled HTML shell, profile UI, game-data uploader, and PWA assets have moved out of the engine repo (see `docs/WEBGL_BUILD.md`)
 - added the ability to do a forward roll without releasing sprint first (#5270)
 - added the ability for Lara to align herself with floor tilts when crawling (Gameplay Options → Controls → Crawl tilt) (#4945)
 - added the ability to turn off or censor blood effects (Graphic Options → Visuals → Blood effects)
@@ -324,6 +325,7 @@ Showcase: https://youtu.be/8SavYv2SawI
 - added an option to let Lara stay crouched without holding the button (Gameplay → Controls → Toggle crouch) (#5006)
 - added an option to let Lara keep sprinting without holding the button (Gameplay → Controls → Toggle sprint) (#5006)
 - added three additional outfits for Lara
+- added WebGL/Emscripten build support — play TR1 and TR2 in the browser
 - added a new console command, `/mod {name}`, to switch between installed game/mod packs without relaunching
 - added a new option in the New Game dialog, "Switch Game", to switch between installed game/mod packs without relaunching
 - added experimental support for config presets (Gameplay Options → Presets)

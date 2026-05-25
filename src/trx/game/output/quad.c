@@ -3,9 +3,9 @@
 #include <trx/core/memory.h>
 #include <trx/debug.h>
 #include <trx/game/output/shaders/generic.h>
+#include <trx/gl/gl_webgl_compat.h>
 #include <trx/gl/utils.h>
 
-#include <GL/glew.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -261,7 +261,7 @@ void Output_Quad_Upload(
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
         TRX_GL_CheckError();
         glTexImage2D(
-            GL_TEXTURE_2D, 0, GL_RGBA, normalized_desc.width,
+            GL_TEXTURE_2D, 0, GL_RGBA8, normalized_desc.width,
             normalized_desc.height, 0, normalized_desc.tex_format,
             normalized_desc.tex_type, data);
         TRX_GL_CheckError();

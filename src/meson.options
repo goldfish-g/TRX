@@ -1,1 +1,2 @@
 option('staticdeps', type: 'boolean', value: true, description: 'Try to build against static dependencies. default: true')
+option('webgl_vfs_stage', type: 'string', value: '', description: 'Path to VFS staging directory for WebGL builds (preloaded into Emscripten FS)')

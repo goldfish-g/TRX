@@ -3,6 +3,7 @@
 #include <trx/core/memory.h>
 #include <trx/core/strings.h>
 #include <trx/core/utils.h>
+#include <trx/core/webgl_log.h>
 #include <trx/game/shell.h>
 #include <trx/game/shell/common.h>
 #include <trx/game/shell/mod.h>
@@ -12,6 +13,7 @@
 
 int main(int argc, char *argv[])
 {
+    WEBGL_LOG("[WEBGL] main() entered");
     VECTOR *raw_args = Vector_Create(sizeof(const char *));
     for (int32_t i = 1; i < argc; i++) {
         char *const copied_arg = Memory_DupStr(argv[i]);
@@ -52,10 +54,15 @@ int main(int argc, char *argv[])
 
         const char *const pending_mod = Shell_GetPendingMod();
         if (pending_mod != nullptr) {
+            // Clear stale directory cache so the path resolver can find
+            // game data that was loaded into the VFS after the previous
+            // Shell_Main built its caches (e.g. custom level profiles).
+            TRXPath_Init(nullptr);
             const SHELL_MOD *const mod = Shell_GetModByName(pending_mod);
             Shell_ClearPendingMod();
             if (mod != nullptr && mod->is_available) {
                 LOG_INFO("Switching mod to: %s", mod->name);
+                Shell_LoadModGameData(mod->name);
                 SHELL_ARGS *const next_args = Memory_Alloc(sizeof(SHELL_ARGS));
                 *next_args = (SHELL_ARGS) {
                     .engine_version = mod->engine_version,

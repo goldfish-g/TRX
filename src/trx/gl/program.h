@@ -1,8 +1,7 @@
 #pragma once
 
 #include <trx/gl/enum.h>
-
-#include <GL/glew.h>
+#include <trx/gl/gl_webgl_compat.h>
 
 typedef struct {
     char *path;

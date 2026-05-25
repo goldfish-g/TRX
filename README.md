@@ -110,7 +110,11 @@ Please refer to [this document](docs/CHANGELOG.md).
 
 4. **Can I play this on Mac, Linux, Android...?**
 
-    Currently supported platforms include Windows, Linux and macOS.
+    Currently supported platforms include Windows, Linux, macOS and the
+    web (WebGL). The WebGL build ships a headless WASM engine and JS
+    loader; pair it with a frontend such as `trx-webgl-shell` to play
+    TR1 and TR2 in the browser on desktop and mobile, with touch
+    controls.
 
 5. **Can I play this with a controller?**
 

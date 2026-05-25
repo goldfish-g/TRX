@@ -76,10 +76,10 @@ static bool M_Init(const char *const path, IMAGE_READER_CONTEXT *const ctx)
     }
 
 #if 0
-    error_code = avformat_find_stream_info(format_ctx, nullptr);
-    if (error_code < 0) {
-        goto finish;
-    }
+error_code = avformat_find_stream_info(format_ctx, nullptr);
+if (error_code < 0) {
+    goto finish;
+}
 #endif
 
     AVStream *video_stream = nullptr;
@@ -117,13 +117,13 @@ static bool M_Init(const char *const path, IMAGE_READER_CONTEXT *const ctx)
     }
 
 #if 0
-    ctx->codec_ctx->thread_count = 0;
-    if (ctx->codec->capabilities & AV_CODEC_CAP_FRAME_THREADS)
-        ctx->codec_ctx->thread_type = FF_THREAD_FRAME;
-    else if (ctx->codec->capabilities & AV_CODEC_CAP_SLICE_THREADS)
-        ctx->codec_ctx->thread_type = FF_THREAD_SLICE;
-    else
-        ctx->codec_ctx->thread_count = 1; //don't use multithreading
+ctx->codec_ctx->thread_count = 0;
+if (ctx->codec->capabilities & AV_CODEC_CAP_FRAME_THREADS)
+    ctx->codec_ctx->thread_type = FF_THREAD_FRAME;
+else if (ctx->codec->capabilities & AV_CODEC_CAP_SLICE_THREADS)
+    ctx->codec_ctx->thread_type = FF_THREAD_SLICE;
+else
+    ctx->codec_ctx->thread_count = 1; //don't use multithreading
 #endif
 
     error_code = avcodec_open2(ctx->codec_ctx, ctx->codec, nullptr);
@@ -538,6 +538,29 @@ IMAGE *Image_Scale(
 
     sws_freeContext(sws_ctx);
     return target_image;
+}
+
+bool Image_GetFileInfo(
+    const char *const path, int32_t *const width, int32_t *const height)
+{
+    IMAGE_READER_CONTEXT ctx;
+    if (!M_Init(path, &ctx)) {
+        if (width != nullptr) {
+            *width = 0;
+        }
+        if (height != nullptr) {
+            *height = 0;
+        }
+        return false;
+    }
+    if (width != nullptr) {
+        *width = ctx.frame->width;
+    }
+    if (height != nullptr) {
+        *height = ctx.frame->height;
+    }
+    M_Free(&ctx);
+    return true;
 }
 
 void Image_Free(IMAGE *image)

@@ -39,3 +39,16 @@ SHELL_SIZE Shell_GetDefaultSize(void);
 SHELL_SIZE Shell_GetWindowSize(void);
 SHELL_SIZE Shell_GetCurrentSize(void);
 SHELL_SIZE Shell_GetCurrentDisplaySize(void);
+
+// Platform-specific functions (flow_emscripten.c / flow_generic.c).
+void Shell_LoadModGameData(const char *mod_name);
+void Shell_InitIDBFS(void);
+void Shell_WaitForUserInput(void);
+void Shell_ShowProfileSelector(
+    char *mod_buf, int32_t mod_buf_size, int32_t *engine_out);
+void Shell_PersistConfigToIDBFS(void);
+void Shell_PersistSavesToIDBFS(void);
+bool Shell_HasTouchSupport(void);
+uint32_t Shell_GetWindowExtraFlags(void);
+void Shell_SetupGLContextVersion(void);
+void Shell_PostSDLInit(void);

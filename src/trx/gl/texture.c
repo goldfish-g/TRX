@@ -89,6 +89,6 @@ void TRX_GL_Texture_LoadFromBackBuffer(TRX_GL_TEXTURE *const texture)
     const int32_t w = side;
     const int32_t h = side;
 
-    glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, x, y, w, h, 0);
+    glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, x, y, w, h, 0);
     TRX_GL_CheckError();
 }
