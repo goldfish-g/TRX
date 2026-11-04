@@ -1,0 +1,34 @@
+[binaries]
+c = ['ccache', 'emcc']
+cpp = ['ccache', 'em++']
+ar = 'emar'
+strip = 'emstrip'
+pkg-config = 'pkg-config'
+
+[built-in options]
+# Under -std=c2x the Emscripten libc keeps to ISO C, so POSIX is asked for.
+c_args = [
+    '-pthread',
+    '-msimd128',
+    '-sUSE_SDL=2',
+    '-sUSE_ZLIB=1',
+    '-D_POSIX_C_SOURCE=200809L',
+    '-I/ext/include',
+    ]
+c_link_args = [
+    '-pthread',
+    '-sUSE_SDL=2',
+    '-sUSE_ZLIB=1',
+    '-sMIN_WEBGL_VERSION=2',
+    '-sMAX_WEBGL_VERSION=2',
+    '-L/ext/lib',
+    ]
+
+[properties]
+pkg_config_libdir = '/ext/lib/pkgconfig'
+
+[host_machine]
+system = 'emscripten'
+cpu_family = 'wasm32'
+cpu = 'wasm32'
+endian = 'little'

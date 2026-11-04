@@ -1,4 +1,7 @@
 ## [Unreleased](https://github.com/LostArtefacts/TRX/compare/trx-1.12...develop) - ××××-××-××
+**Platforms**
+- Added a build for web browsers, which runs the games through WebGL 2 in a web page that hosts them (see BUILDING_FOR_WEB.md)
+
 **Rendering**
 - Fixed certain sparks, such as smoke and gas, not being drawn during fixed or cinematic camera sequences when Lara is far from the spawn position (OG bug) (TRX1966)
 

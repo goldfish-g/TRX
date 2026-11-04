@@ -239,8 +239,6 @@ dep_avcodec = dependency('libavcodec', static: staticdeps)
 dep_avfilter = dependency('libavfilter', static: staticdeps)
 dep_avformat = dependency('libavformat', static: staticdeps)
 dep_avutil = dependency('libavutil', static: staticdeps)
-dep_sdl2 = dependency('SDL2', static: staticdeps)
-dep_glew = dependency('glew', static: staticdeps)
 dep_pcre2 = dependency('libpcre2-8', static: staticdeps)
 dep_backtrace = c_compiler.find_library('backtrace', static: true, required: false)
 dep_swscale = dependency('libswscale', static: staticdeps)
@@ -249,12 +247,24 @@ dep_lua = dependency(get_option('lua_dep'), static: staticdeps)
 c_compiler.check_header('uthash.h', required: true)
 dep_mathlibrary = c_compiler.find_library('m', static: staticdeps, required: false)
 
+# Emscripten brings SDL2, zlib and OpenGL ES with it, as the cross file asks,
+# and there is no OpenGL loader to go through in the browser.
+if host_machine.system() == 'emscripten'
+  dep_sdl2 = null_dep
+  dep_glew = null_dep
+else
+  dep_sdl2 = dependency('SDL2', static: staticdeps)
+  dep_glew = dependency('glew', static: staticdeps)
+endif
+
 dep_zlib = null_dep
 if not staticdeps
   dep_zlib = dependency('zlib', static: staticdeps)
 endif
 
-if host_machine.system() == 'windows'
+if host_machine.system() == 'emscripten'
+  dep_opengl = null_dep
+elif host_machine.system() == 'windows'
   dep_opengl = c_compiler.find_library('opengl32')
 else
   dep_opengl = dependency('GL')
@@ -1018,14 +1028,43 @@ else
   common_sources += ['trx/core/log_unknown.c']
 endif
 
+# A module that differs by platform builds from <module>_<platform>.c.
+platform = host_machine.system() == 'emscripten' ? 'emscripten' : 'generic'
 common_sources += [
-  'trx/game/clock/clock_generic.c',
-  'trx/game/shell/host_generic.c',
+  'trx/game/clock/clock_' + platform + '.c',
+  'trx/game/shell/host_' + platform + '.c',
 ]
 
 link_args = []
+name_suffix = []
 if host_machine.system() == 'windows'
   link_args += ['-static']
+elif host_machine.system() == 'emscripten'
+  name_suffix = 'js'
+  link_args += [
+    # The game runs a loop of its own and waits for its frames. Asyncify lets
+    # it hand control back to the page while it waits.
+    '-sASYNCIFY',
+    '-sASYNCIFY_STACK_SIZE=131072',
+    # FFmpeg and rubberband never call back into code that waits, so Asyncify
+    # leaves them as they are, which halves what it adds to the binary.
+    '-sASYNCIFY_REMOVE=["ff_*","av_*","avio_*","avcodec_*","avformat_*","avfilter_*","sws_*","swr_*","*RubberBand*"]',
+    '-sALLOW_MEMORY_GROWTH',
+    '-sINITIAL_MEMORY=268435456',
+    '-sSTACK_SIZE=2097152',
+    # Video decoding and the audio mixer run on threads of their own.
+    '-sPTHREAD_POOL_SIZE=6',
+    '-sENVIRONMENT=web,worker',
+    '-sMODULARIZE',
+    '-sEXPORT_NAME=TRX',
+    '-sEXIT_RUNTIME',
+    '-sEXPORTED_RUNTIME_METHODS=["callMain","FS","IDBFS","UTF8ToString"]',
+    '-sEXPORTED_FUNCTIONS=["_main","_trx_get_version"]',
+    '-lidbfs.js',
+    # The files the game ships with load along with it, at the root of its
+    # file system, where the desktop game finds them next to itself.
+    '--preload-file', meson.project_source_root() / '../data/trx/ship@/',
+  ]
 endif
 
 
@@ -1087,6 +1126,7 @@ executable(
   install: true,
   install_tag: 'common',
   c_args: ['-I.'],
+  name_suffix: name_suffix,
 )
 
 if host_machine.system() == 'darwin'

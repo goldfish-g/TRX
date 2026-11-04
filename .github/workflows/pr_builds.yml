@@ -35,6 +35,15 @@ jobs:
       zip: false
     secrets: inherit
 
+  package_webgl:
+    name: WebGL
+    uses: ./.github/workflows/job_build.yml
+    with:
+      platform: webgl
+      target: debug
+      zip: false
+    secrets: inherit
+
   package_win_te:
     name: Build Tomb Editor bundle
     needs:

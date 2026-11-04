@@ -17,9 +17,9 @@ def generate_version(repo_dir: Path | None = None) -> str:
 
 
 def generate_package_name(engine_version: str, platform: str) -> str:
-    if platform == "win":
-        platform = "windows"
-    elif platform == "win-installer":
-        platform = "windows_installer"
-    platform = platform.title()
+    platform = {
+        "win": "Windows",
+        "win-installer": "Windows_Installer",
+        "webgl": "WebGL",
+    }.get(platform, platform.title())
     return "-".join(["TRX", engine_version, platform])

@@ -48,7 +48,8 @@ class PackageOptions(BaseOptions):
 
     @property
     def ship_dirs(self) -> list[Path]:
-        if self.platform == "win-installer":
+        # The browser build carries the ship files inside TRX.data.
+        if self.platform in ("win-installer", "webgl"):
             return []
         return [Path("/app/data/trx/ship/")]
 
@@ -59,6 +60,15 @@ class PackageOptions(BaseOptions):
 
         elif self.platform == "win":
             return [(self.build_root / "TRX.exe", "TRX.exe")]
+        elif self.platform == "webgl":
+            emscripten_dir = TOOLS_DIR / "shared/emscripten"
+            return [
+                (self.build_root / "TRX.js", "trx-engine.js"),
+                (self.build_root / "TRX.wasm", "TRX.wasm"),
+                (self.build_root / "TRX.data", "TRX.data"),
+                (emscripten_dir / "trx-adapter.js", "trx-adapter.js"),
+                (emscripten_dir / "trx-adapter.d.ts", "trx-adapter.d.ts"),
+            ]
         elif self.platform == "win-installer":
             return [
                 (
@@ -88,6 +98,11 @@ class BuildOptions(BaseOptions):
             return [
                 "--cross",
                 "/app/tools/shared/docker/game-win/meson_linux_mingw32.txt",
+            ]
+        if self.platform == "webgl":
+            return [
+                "--cross",
+                "/app/tools/shared/docker/game-webgl/meson_emscripten.txt",
             ]
         return []
 

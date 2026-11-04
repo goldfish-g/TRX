@@ -28,6 +28,10 @@ Follow [BUILDING_ON_WINDOWS.md](BUILDING_ON_WINDOWS.md).
 
 Follow [BUILDING_ON_MACOS.md](BUILDING_ON_MACOS.md).
 
+### Compiling for the web
+
+Follow [BUILDING_FOR_WEB.md](BUILDING_FOR_WEB.md).
+
 ### Supported compilers
 
 Please be advised that any build systems that are not the one we use for

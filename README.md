@@ -110,7 +110,9 @@ Please refer to [this document](docs/CHANGELOG.md).
 
 3. **Can I play this on Mac, Linux, Android...?**
 
-    Currently supported platforms include Windows, Linux and macOS.
+    Currently supported platforms include Windows, Linux and macOS. TRX can
+    also be built for web browsers, to be hosted by a web page; see
+    [BUILDING_FOR_WEB.md](docs/BUILDING_FOR_WEB.md).
 
 4. **Can I play this with a controller?**
 
