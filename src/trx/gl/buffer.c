@@ -49,23 +49,6 @@ void TRX_GL_Buffer_SubData(
     TRX_GL_CheckError();
 }
 
-void *TRX_GL_Buffer_Map(TRX_GL_BUFFER *buf, GLenum access)
-{
-    ASSERT(buf != nullptr);
-    ASSERT(buf->initialized);
-    void *ret = glMapBuffer(buf->target, access);
-    TRX_GL_CheckError();
-    return ret;
-}
-
-void TRX_GL_Buffer_Unmap(TRX_GL_BUFFER *buf)
-{
-    ASSERT(buf != nullptr);
-    ASSERT(buf->initialized);
-    glUnmapBuffer(buf->target);
-    TRX_GL_CheckError();
-}
-
 GLint TRX_GL_Buffer_Parameter(TRX_GL_BUFFER *buf, GLenum pname)
 {
     ASSERT(buf != nullptr);
