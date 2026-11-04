@@ -11,6 +11,8 @@ void TRX_GL_Sampler_Init(TRX_GL_SAMPLER *sampler);
 void TRX_GL_Sampler_Close(TRX_GL_SAMPLER *sampler);
 
 void TRX_GL_Sampler_Bind(TRX_GL_SAMPLER *sampler, GLuint unit);
+// Returns the sampler bound to a texture unit, 0 for none.
+GLuint TRX_GL_Sampler_GetBound(GLuint unit);
 void TRX_GL_Sampler_Parameteri(
     TRX_GL_SAMPLER *sampler, GLenum pname, GLint param);
 void TRX_GL_Sampler_Parameterf(

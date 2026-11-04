@@ -5,6 +5,7 @@
 #include <trx/game/output/shaders/generic.h>
 #include <trx/game/viewport.h>
 #include <trx/gl/api.h>
+#include <trx/gl/sampler.h>
 #include <trx/gl/utils.h>
 
 #include <stddef.h>
@@ -576,8 +577,7 @@ void Output_Quad_Render(OUTPUT_QUAD *const r)
         glBindTexture(GL_TEXTURE_2D, r->texture);
     }
     M_ApplyFilter(r);
-    GLint prev_sampler = 0;
-    glGetIntegeri_v(GL_SAMPLER_BINDING, 0, &prev_sampler);
+    const GLuint prev_sampler = TRX_GL_Sampler_GetBound(0);
     glBindSampler(0, 0);
 
     const GLboolean was_blend_enabled = glIsEnabled(GL_BLEND);
@@ -596,7 +596,7 @@ void Output_Quad_Render(OUTPUT_QUAD *const r)
 
     glDrawArrays(GL_TRIANGLES, 0, r->vertex_count);
 
-    glBindSampler(0, (GLuint)prev_sampler);
+    glBindSampler(0, prev_sampler);
     glPolygonMode(GL_FRONT_AND_BACK, bound_polygon_mode[0]);
     if (was_depth_test_enabled) {
         glEnable(GL_DEPTH_TEST);
@@ -624,8 +624,7 @@ void Output_Quad_RenderWithBlend(OUTPUT_QUAD *const r)
         glBindTexture(GL_TEXTURE_2D, r->texture);
     }
     M_ApplyFilter(r);
-    GLint prev_sampler = 0;
-    glGetIntegeri_v(GL_SAMPLER_BINDING, 0, &prev_sampler);
+    const GLuint prev_sampler = TRX_GL_Sampler_GetBound(0);
     glBindSampler(0, 0);
 
     const GLboolean was_blend_enabled = glIsEnabled(GL_BLEND);
@@ -647,7 +646,7 @@ void Output_Quad_RenderWithBlend(OUTPUT_QUAD *const r)
 
     glDrawArrays(GL_TRIANGLES, 0, r->vertex_count);
 
-    glBindSampler(0, (GLuint)prev_sampler);
+    glBindSampler(0, prev_sampler);
     glPolygonMode(GL_FRONT_AND_BACK, bound_polygon_mode[0]);
     if (was_depth_test_enabled) {
         glEnable(GL_DEPTH_TEST);

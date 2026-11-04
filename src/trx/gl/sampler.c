@@ -29,6 +29,19 @@ void TRX_GL_Sampler_Bind(TRX_GL_SAMPLER *sampler, GLuint unit)
     TRX_GL_CheckError();
 }
 
+GLuint TRX_GL_Sampler_GetBound(const GLuint unit)
+{
+    // GL_SAMPLER_BINDING has no indexed form; it reads the active unit.
+    GLint active_unit = GL_TEXTURE0;
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &active_unit);
+    glActiveTexture(GL_TEXTURE0 + unit);
+    GLint sampler = 0;
+    glGetIntegerv(GL_SAMPLER_BINDING, &sampler);
+    glActiveTexture(active_unit);
+    TRX_GL_CheckError();
+    return (GLuint)sampler;
+}
+
 void TRX_GL_Sampler_Parameteri(
     TRX_GL_SAMPLER *sampler, GLenum pname, GLint param)
 {

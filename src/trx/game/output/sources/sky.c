@@ -170,7 +170,7 @@ static void M_RenderPass(
     glVertexAttribI1ui(OUTPUT_MESH_ATTR_FLAGS, flags);
     Output_MeshShader_UploadTint(p->shader, COLOR_RGBA_F_WHITE);
 
-    GLint prev_sampler = 0;
+    GLuint prev_sampler = 0;
     if (texture_page >= 0) {
         const GLint gl_filter =
             g_Config.rendering.texture_filter == TEXTURE_FILTER_BILINEAR
@@ -180,7 +180,7 @@ static void M_RenderPass(
             &p->sampler, GL_TEXTURE_MIN_FILTER, gl_filter);
         TRX_GL_Sampler_Parameteri(
             &p->sampler, GL_TEXTURE_MAG_FILTER, gl_filter);
-        glGetIntegeri_v(GL_SAMPLER_BINDING, 0, &prev_sampler);
+        prev_sampler = TRX_GL_Sampler_GetBound(0);
         TRX_GL_Sampler_Bind(&p->sampler, 0);
     }
 
@@ -207,7 +207,7 @@ static void M_RenderPass(
         }
     }
     if (texture_page >= 0) {
-        glBindSampler(0, (GLuint)prev_sampler);
+        glBindSampler(0, prev_sampler);
     }
     TRX_GL_CheckError();
 }
