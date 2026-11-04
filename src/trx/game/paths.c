@@ -625,6 +625,16 @@ static const char *M_StripOptionalPrefix(
     return value;
 }
 
+// Joins a directory and a name beneath it. A root directory, as the game
+// directory is in the browser, ends in a separator of its own already.
+static char *M_JoinDir(const char *const dir, const char *const name)
+{
+    const size_t len = strlen(dir);
+    const bool has_separator =
+        len > 0 && (dir[len - 1] == '/' || dir[len - 1] == '\\');
+    return String_Format(has_separator ? "%s%s" : "%s/%s", dir, name);
+}
+
 static void M_TrimTrailingSeparators(char *const path)
 {
     if (path == nullptr) {
@@ -653,7 +663,7 @@ static bool M_SetDirFromEnv(
     if (env_value != nullptr && !String_IsEmpty(env_value)) {
         *target = Memory_DupStr(env_value);
     } else {
-        *target = String_Format("%s/%s", m_Context.trx_dir, default_suffix);
+        *target = M_JoinDir(m_Context.trx_dir, default_suffix);
     }
     M_TrimTrailingSeparators(*target);
     if (check_existence && !FS_DirExists(*target)) {
@@ -1167,7 +1177,7 @@ void GamePath_Init(const SHELL_ARGS *const args)
         &m_Context.saves_dir, getenv("TRX_SAVES_DIR"), "saves", false);
 
     Memory_FreePointer(&m_Context.legacy_saves_dir);
-    m_Context.legacy_saves_dir = String_Format("%s/saves", m_Context.trx_dir);
+    m_Context.legacy_saves_dir = M_JoinDir(m_Context.trx_dir, "saves");
 
     M_BuildModChain(args);
     M_SeedResolverCaches();
