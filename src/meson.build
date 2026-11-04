@@ -1018,7 +1018,10 @@ else
   common_sources += ['trx/core/log_unknown.c']
 endif
 
-common_sources += ['trx/game/clock/clock_generic.c']
+common_sources += [
+  'trx/game/clock/clock_generic.c',
+  'trx/game/shell/host_generic.c',
+]
 
 link_args = []
 if host_machine.system() == 'windows'

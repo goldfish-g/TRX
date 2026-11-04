@@ -12,12 +12,14 @@
 #include <trx/game/game_flow.h>
 #include <trx/game/game_strings/manager.h>
 #include <trx/game/lua.h>
+#include <trx/game/lua/guard.h>
 #include <trx/game/lua/startup.h>
 #include <trx/game/output.h>
 #include <trx/game/replay/test_recorder.h>
 #include <trx/game/replay/test_replay.h>
 #include <trx/game/savegame.h>
 #include <trx/game/shell.h>
+#include <trx/game/shell/host.h>
 #include <trx/game/shell/platform.h>
 #include <trx/game/shell/session.h>
 #include <trx/game/shell/state.h>
@@ -52,7 +54,8 @@ static RESULT M_CreateGameWindow(void)
     m_Window = SDL_CreateWindow(
         "TRX", g_Config.window.x, g_Config.window.y, g_Config.window.width,
         g_Config.window.height,
-        SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
+        SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL
+            | Shell_Host_GetWindowFlags());
 
     FAIL_IF(
         m_Window == nullptr, "the game window could not be created: %s",
@@ -155,6 +158,7 @@ static RESULT M_LoadCatalog(
 static RESULT M_InitModules(void)
 {
     Shell_SetupHiDPI();
+    Shell_Host_SetupSDL();
     Shell_SetupLibAV();
     MUST(M_SetupSDL());
     M_SetupGL();
@@ -366,6 +370,7 @@ int32_t Shell_Main(const SHELL_ARGS *const args)
     LOG_INFO("Game directory: %s", GamePath_Get(GAME_PATH_TRX_DIR));
 
     EXIT_ON_FAIL(M_InitModules(), "TRX could not start");
+    Shell_Host_OpenStorage(s->args->startup.mod);
     EXIT_ON_FAIL(M_PrepareSystem(), "TRX could not start");
     if (s->args->startup.mod == nullptr) {
         Shell_ExitSystem("No --mod specified.");
@@ -409,6 +414,9 @@ int32_t Shell_Main(const SHELL_ARGS *const args)
     }
 
     Stats_CalculateMaxStats();
+    Shell_Host_WaitForStart();
+    // However long the host held the game, no script ran meanwhile.
+    LUA_Guard_Heartbeat();
     GF_COMMAND gf_cmd;
     EXIT_ON_FAIL(
         GF_DoFrontendSequence(&gf_cmd), "Cannot work out where to start");

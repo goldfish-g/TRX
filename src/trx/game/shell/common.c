@@ -6,6 +6,7 @@
 #include <trx/debug.h>
 #include <trx/game/replay/test_replay.h>
 #include <trx/game/shell.h>
+#include <trx/game/shell/host.h>
 
 #ifdef _WIN32
     #include <objbase.h>
@@ -149,11 +150,10 @@ SHELL_SIZE Shell_GetWindowSize(void)
         return Shell_GetDefaultSize();
     }
     SDL_Window *const window = Shell_GetWindow();
-    SHELL_SIZE result = { .w = -1, .h = -1 };
-    if (window != nullptr) {
-        SDL_GetWindowSize(window, &result.w, &result.h);
+    if (window == nullptr) {
+        return (SHELL_SIZE) { .w = -1, .h = -1 };
     }
-    return result;
+    return Shell_Host_GetWindowSize(window);
 }
 
 void Shell_ScheduleExit(void)

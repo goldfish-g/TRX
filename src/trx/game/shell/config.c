@@ -13,6 +13,7 @@
 #include <trx/game/replay/test_replay.h>
 #include <trx/game/savegame.h>
 #include <trx/game/shell.h>
+#include <trx/game/shell/host.h>
 #include <trx/game/sound.h>
 #include <trx/game/ui/touch_overlay.h>
 #include <trx/game/viewport.h>
@@ -72,6 +73,10 @@ void Shell_SyncToWindow(void)
         g_Config.window.is_fullscreen, g_Config.window.is_borderless,
         g_Config.window.is_maximized, g_Config.window.x, g_Config.window.y,
         g_Config.window.width, g_Config.window.height);
+
+    if (!Shell_Host_OwnsWindow()) {
+        return;
+    }
 
     SDL_Window *const window = Shell_GetWindow();
     if (g_Config.window.is_fullscreen && g_Config.window.is_borderless) {

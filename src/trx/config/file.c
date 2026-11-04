@@ -11,6 +11,7 @@
 #include <trx/core/memory.h>
 #include <trx/core/subsystem.h>
 #include <trx/debug.h>
+#include <trx/game/shell/host.h>
 
 #include <string.h>
 
@@ -114,6 +115,7 @@ RESULT ConfigFile_Read(
 {
     ASSERT(default_path != nullptr);
     M_FreeRetained();
+    Shell_Host_RestoreFile(default_path);
     m_CfgFound = FS_Exists(default_path);
 
     RESULT result = JSONFile_Read(default_path, &m_CfgRoot);
@@ -208,6 +210,9 @@ RESULT ConfigFile_Write(
 
     JSON_VALUE *const new_root = JSON_ValueFromObject(root_obj);
     const RESULT result = JSONFile_Write(default_path, new_root);
+    if (IS_OK(result)) {
+        Shell_Host_KeepFile(default_path);
+    }
 
     JSON_ValueFree(new_root);
     return result;

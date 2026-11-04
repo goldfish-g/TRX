@@ -10,6 +10,7 @@
 #include <trx/game/savegame.h>
 #include <trx/game/savegame/file.h>
 #include <trx/game/shell.h>
+#include <trx/game/shell/host.h>
 
 static SAVEGAME_INFO *m_NormalSavegameInfo = nullptr;
 static SAVEGAME_INFO *m_QuickSavegameInfo = nullptr;
@@ -499,6 +500,7 @@ bool SG_Manager_WriteSlot(const SAVEGAME_SLOT_REF slot)
     }
     if (result) {
         M_FillSlot(slot, full_path);
+        Shell_Host_KeepFile(full_path);
     }
 
     Memory_FreePointer(&file_name);
