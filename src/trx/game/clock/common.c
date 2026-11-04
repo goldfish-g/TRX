@@ -48,8 +48,8 @@ static void M_WaitForFrame(const double frames)
         const double frame_ticks = frames * m_Frequency / Clock_GetCurrentFPS();
         const double elapsed = (double)(now - m_LastCounter);
         if (elapsed < frame_ticks) {
-            SDL_Delay(
-                (Uint32)(((frame_ticks - elapsed) / m_Frequency) * 1000.0));
+            Clock_Delay(
+                (int32_t)(((frame_ticks - elapsed) / m_Frequency) * 1000.0));
         }
     }
     m_LastCounter = SDL_GetPerformanceCounter();
@@ -193,7 +193,7 @@ int32_t Clock_WaitTick(void)
         double delay_ms = (needed / m_Frequency) * 1000.0;
 
         if (delay_ms > 0) {
-            SDL_Delay((Uint32)delay_ms);
+            Clock_Delay((int32_t)delay_ms);
         }
 
         // After waiting, measure again to be accurate
@@ -209,6 +209,9 @@ int32_t Clock_WaitTick(void)
             // one frame
             frames = 1;
         }
+    } else {
+        // A frame that runs late still lets the platform have its turn.
+        Clock_Delay(0);
     }
 
     // Consume the frames from the m_Accumulator

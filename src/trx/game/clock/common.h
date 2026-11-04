@@ -3,6 +3,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// Holds the game for the given number of milliseconds. Where the platform
+// runs the game in turns with others, as the browser does, it also gives them
+// their turn, even when asked to hold for none.
+void Clock_Delay(int32_t ms);
+
 // Disables any kind of waiting in Clock_WaitTick
 void Clock_DisableWait(void);
 

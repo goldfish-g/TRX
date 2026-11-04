@@ -1018,6 +1018,8 @@ else
   common_sources += ['trx/core/log_unknown.c']
 endif
 
+common_sources += ['trx/game/clock/clock_generic.c']
+
 link_args = []
 if host_machine.system() == 'windows'
   link_args += ['-static']
