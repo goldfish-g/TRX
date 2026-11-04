@@ -22,6 +22,7 @@
 #include <trx/game/shell/session.h>
 #include <trx/game/shell/state.h>
 #include <trx/game/stats.h>
+#include <trx/gl/api.h>
 #include <trx/gl/context.h>
 #include <trx/version.h>
 
@@ -93,10 +94,11 @@ static RESULT M_CreateGLContext(void)
     if (TRX_GL_Context_GetWindowHandle() != nullptr) {
         return OK; // GL context persists across mod switches
     }
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(
-        SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+        SDL_GL_CONTEXT_MAJOR_VERSION, TRX_GL_CONTEXT_MAJOR_VERSION);
+    SDL_GL_SetAttribute(
+        SDL_GL_CONTEXT_MINOR_VERSION, TRX_GL_CONTEXT_MINOR_VERSION);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, TRX_GL_CONTEXT_PROFILE);
     const RESULT attached = TRX_GL_Context_Attach(m_Window);
     if (!IS_OK(attached)) {
         return M_FailUnsupportedGraphics(attached);

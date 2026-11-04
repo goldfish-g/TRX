@@ -1,6 +1,6 @@
 #include <trx/gl/utils.h>
 
-#include <GL/glew.h>
+#include <trx/gl/api.h>
 
 const char *TRX_GL_GetErrorString(GLenum err)
 {
@@ -29,6 +29,9 @@ const char *TRX_GL_GetErrorString(GLenum err)
 void TRX_GL_CheckErrorAt(
     const char *const file, const int line, const char *const func)
 {
+    if (!TRX_GL_HAS_CHEAP_ERROR_CHECKS) {
+        return;
+    }
     for (GLenum err; (err = glGetError()) != GL_NO_ERROR;) {
         Log_Message(
             LOG_LEVEL_ERROR, file, line, func, "glGetError: (%s)",

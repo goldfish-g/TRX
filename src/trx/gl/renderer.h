@@ -1,10 +1,10 @@
 #pragma once
 
 #include <trx/core/result.h>
+#include <trx/gl/api.h>
 #include <trx/gl/config.h>
 #include <trx/gl/texture.h>
 
-#include <GL/glew.h>
 #include <stdint.h>
 
 typedef struct TRX_GL_Renderer {

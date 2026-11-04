@@ -15,7 +15,7 @@ static struct {
 
 void TRX_GL_GpuTimer_Init(const bool is_enabled)
 {
-    if (m_Priv.active || !is_enabled) {
+    if (m_Priv.active || !is_enabled || !TRX_GL_HAS_TIMER_QUERIES) {
         return;
     }
     for (int32_t i = 0; i < TRX_GL_GPU_TIMER_SLOTS; i++) {

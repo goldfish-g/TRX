@@ -4,9 +4,9 @@
 #include <trx/debug.h>
 #include <trx/game/output/shaders/generic.h>
 #include <trx/game/viewport.h>
+#include <trx/gl/api.h>
 #include <trx/gl/utils.h>
 
-#include <GL/glew.h>
 #include <stddef.h>
 #include <string.h>
 

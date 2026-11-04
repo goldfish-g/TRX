@@ -1477,6 +1477,18 @@ static bool M_IsBaseVertexInVertexID(void)
     return result;
 }
 
+// Returns how many vertices of the mesh buffers a batch can reach, or 0 where
+// the GL cannot batch at all.
+static int32_t M_GetBatchMaxVertices(void)
+{
+    if (!TRX_GL_HAS_BATCHING || !M_IsBaseVertexInVertexID()) {
+        return 0;
+    }
+    GLint max_texels = 0;
+    glGetIntegerv(GL_MAX_TEXTURE_BUFFER_SIZE, &max_texels);
+    return max_texels / (int32_t)(sizeof(M_MESH_TEXTURE) / sizeof(uint32_t));
+}
+
 MESH_BATCHER *MeshBatcher_Create(void)
 {
     MESH_BATCHER *const batcher = Memory_Alloc(sizeof(MESH_BATCHER));
@@ -1510,11 +1522,7 @@ MESH_BATCHER *MeshBatcher_Create(void)
     GLint slot_align = 1;
     glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &slot_align);
     batcher->batch.slot_align = MAX(slot_align, 1);
-    GLint max_texels = 0;
-    glGetIntegerv(GL_MAX_TEXTURE_BUFFER_SIZE, &max_texels);
-    batcher->batch.max_vertices = M_IsBaseVertexInVertexID()
-        ? max_texels / (int32_t)(sizeof(M_MESH_TEXTURE) / sizeof(uint32_t))
-        : 0;
+    batcher->batch.max_vertices = M_GetBatchMaxVertices();
     batcher->batch_indices = Vector_Create(sizeof(uint32_t));
     for (int32_t run = 0; run < M_RUN_COUNT; run++) {
         batcher->batch_draws[run] = (M_DRAW_LIST) {
@@ -1548,11 +1556,13 @@ MESH_BATCHER *MeshBatcher_Create(void)
         batcher->vbo.geom,
     };
     const GLenum formats[4] = { GL_R32UI, GL_R32UI, GL_R32UI, GL_RGBA8 };
-    for (int32_t i = 0; i < 4; i++) {
-        glBindTexture(GL_TEXTURE_BUFFER, textures[i]);
-        glTexBuffer(GL_TEXTURE_BUFFER, formats[i], sources[i]);
+    if (batcher->batch.max_vertices > 0) {
+        for (int32_t i = 0; i < 4; i++) {
+            glBindTexture(GL_TEXTURE_BUFFER, textures[i]);
+            glTexBuffer(GL_TEXTURE_BUFFER, formats[i], sources[i]);
+        }
+        glBindTexture(GL_TEXTURE_BUFFER, 0);
     }
-    glBindTexture(GL_TEXTURE_BUFFER, 0);
 
     return batcher;
 }

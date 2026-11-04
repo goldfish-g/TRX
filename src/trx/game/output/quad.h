@@ -2,9 +2,9 @@
 
 #include <trx/core/colors.h>
 #include <trx/core/result.h>
+#include <trx/gl/api.h>
 #include <trx/gl/enum.h>
 
-#include <GL/glew.h>
 #include <stdint.h>
 
 // Textured screen-space quad renderer used by output code paths such as FMV

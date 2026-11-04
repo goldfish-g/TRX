@@ -4,6 +4,7 @@
 #include <trx/core/utils.h>
 #include <trx/debug.h>
 #include <trx/game/viewport.h>
+#include <trx/gl/api.h>
 #include <trx/gl/buffer.h>
 #include <trx/gl/context.h>
 #include <trx/gl/program.h>
@@ -11,10 +12,11 @@
 #include <trx/gl/utils.h>
 #include <trx/gl/vertex_array.h>
 
-#include <GL/glew.h>
-
 static int32_t M_ClampSamples(const int32_t samples)
 {
+    if (!TRX_GL_HAS_MULTISAMPLING) {
+        return 1;
+    }
     GLint max_samples = 1;
     glGetIntegerv(GL_MAX_SAMPLES, &max_samples);
     return MAX(1, MIN(samples, (int32_t)max_samples));

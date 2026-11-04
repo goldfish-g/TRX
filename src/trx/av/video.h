@@ -5,6 +5,12 @@
 #include <libavutil/pixfmt.h>
 #include <stdint.h>
 
+#ifdef __EMSCRIPTEN__
+    #include <trx/av/video_emscripten.h>
+#else
+    #include <trx/av/video_generic.h>
+#endif
+
 typedef struct {
     const char *path;
     bool is_playing;

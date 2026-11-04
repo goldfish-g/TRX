@@ -1,8 +1,8 @@
 #pragma once
 
 #include <trx/core/result.h>
+#include <trx/gl/api.h>
 
-#include <GL/glew.h>
 #include <stdint.h>
 
 // Writes the contents of the viewport to an image file, reporting a path it

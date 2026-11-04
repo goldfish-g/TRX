@@ -4,6 +4,7 @@
 #include <trx/core/memory.h>
 #include <trx/core/utils.h>
 #include <trx/debug.h>
+#include <trx/gl/api.h>
 #include <trx/gl/buffer.h>
 #include <trx/gl/context.h>
 #include <trx/gl/enum.h>
@@ -15,7 +16,6 @@
 #include <trx/gl/utils.h>
 #include <trx/gl/vertex_array.h>
 
-#include <GL/glew.h>
 #include <SDL2/SDL_video.h>
 #include <stdint.h>
 
@@ -329,8 +329,10 @@ static RESULT M_Init(
 
     p->config = config;
 
-    glEnable(GL_MULTISAMPLE);
-    TRX_GL_CheckError();
+    if (TRX_GL_HAS_MULTISAMPLING) {
+        glEnable(GL_MULTISAMPLE);
+        TRX_GL_CheckError();
+    }
 
     TRX_GL_Buffer_Init(&p->buffer, GL_ARRAY_BUFFER);
     TRX_GL_Buffer_Bind(&p->buffer);

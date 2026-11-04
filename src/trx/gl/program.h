@@ -1,9 +1,8 @@
 #pragma once
 
 #include <trx/core/result.h>
+#include <trx/gl/api.h>
 #include <trx/gl/enum.h>
-
-#include <GL/glew.h>
 
 typedef struct {
     char *path;

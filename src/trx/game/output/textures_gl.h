@@ -5,7 +5,7 @@
 // everything that reads sprite geometry would otherwise pull the whole of GLEW
 // in for the sake of these two.
 
-#include <GL/glew.h>
+#include <trx/gl/api.h>
 
 GLuint Output_Textures_GetAtlasTexture(void);
 GLuint Output_Textures_GetEnvMapTexture(void);

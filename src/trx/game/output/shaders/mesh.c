@@ -37,7 +37,8 @@
 // A buffer that each upload takes a fresh stretch of, so that no upload
 // writes where an earlier draw may still read: a driver waits for such a draw
 // to finish before it writes. The ring starts over in new storage once it
-// runs out.
+// runs out. Without unsynchronized writes, even a fresh stretch waits for the
+// draws that read the rest of the buffer, so every upload starts over.
 typedef struct {
     GLuint buffer;
     size_t size;
@@ -127,7 +128,8 @@ static int32_t M_GetMaxLights(void)
 static int32_t M_GetVariantIndex(void)
 {
     int32_t idx = 0;
-    if (g_Config.rendering.enable_affine_mapping && !m_SubdivisionSuspended) {
+    if (TRX_GL_HAS_GEOMETRY_SHADERS && g_Config.rendering.enable_affine_mapping
+        && !m_SubdivisionSuspended) {
         idx |= M_VARIANT_SUBDIVIDE;
     }
     if (m_NoAlphaDiscard) {
@@ -191,7 +193,8 @@ static void M_InitRing(
     M_RING *const ring, const size_t block_size, const size_t align)
 {
     *ring = (M_RING) {
-        .size = block_size + M_RING_SPAN,
+        .size =
+            block_size + (TRX_GL_HAS_UNSYNCHRONIZED_WRITES ? M_RING_SPAN : 0),
         .block_size = block_size,
         .align = align,
     };
@@ -220,16 +223,12 @@ static void M_PutRing(
 {
     size_t offset = (ring->pos + ring->align - 1) / ring->align * ring->align;
     glBindBuffer(GL_UNIFORM_BUFFER, ring->buffer);
-    if (offset + ring->block_size > ring->size) {
+    if (!TRX_GL_HAS_UNSYNCHRONIZED_WRITES
+        || offset + ring->block_size > ring->size) {
         glBufferData(GL_UNIFORM_BUFFER, ring->size, nullptr, GL_STREAM_DRAW);
         offset = 0;
     }
-    void *const target = glMapBufferRange(
-        GL_UNIFORM_BUFFER, offset, size,
-        GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_RANGE_BIT
-            | GL_MAP_UNSYNCHRONIZED_BIT);
-    memcpy(target, data, size);
-    glUnmapBuffer(GL_UNIFORM_BUFFER);
+    TRX_GL_WriteBufferRange(GL_UNIFORM_BUFFER, offset, size, data);
     g_TRX_GL_Metrics.buffer_total_bytes += size;
     g_TRX_GL_Metrics.buffer_transfer_count++;
     ring->pos = offset + size;
@@ -283,13 +282,20 @@ RESULT Output_MeshShader_Create(OUTPUT_MESH_SHADER **const out_shader)
 {
     *out_shader = nullptr;
     OUTPUT_MESH_SHADER *const shader = Memory_Alloc(sizeof(*shader));
-    shader->max_slots =
-        M_GetBlockCapacity(sizeof(OUTPUT_MESH_SLOT), M_MAX_SLOTS);
+    // Without batching, every draw holds a single instance.
+    shader->max_slots = TRX_GL_HAS_BATCHING
+        ? M_GetBlockCapacity(sizeof(OUTPUT_MESH_SLOT), M_MAX_SLOTS)
+        : 1;
     shader->max_lights = M_GetMaxLights();
     for (int32_t i = 0; i < M_VARIANT_COUNT; i++) {
         shader->env_map_rect[i] = (OUTPUT_ATLAS_RECT) { .layer = -1 };
 
+        // Without a geometry stage there is nothing to subdivide with, and
+        // M_GetVariantIndex never picks the variants that would.
         const bool subdivides = M_VariantSubdivides(i);
+        if (subdivides && !TRX_GL_HAS_GEOMETRY_SHADERS) {
+            continue;
+        }
         char *const defines =
             M_GetVariantDefines(i, shader->max_slots, shader->max_lights);
         const RESULT result = Output_Shader_CreateEx(
@@ -307,22 +313,25 @@ RESULT Output_MeshShader_Create(OUTPUT_MESH_SHADER **const out_shader)
                 shader->base[i], "uTexEnvMap", &loc)) {
             TRX_GL_TRACK_UNIFORM(glUniform1i, loc, 1);
         }
-        TRX_GL_TRACK_UNIFORM(
-            glUniform1i,
-            Output_Shader_LookupUniform(shader->base[i], "uGeomData"),
-            M_GEOM_DATA_UNIT);
-        TRX_GL_TRACK_UNIFORM(
-            glUniform1i,
-            Output_Shader_LookupUniform(shader->base[i], "uTexData"),
-            M_TEX_DATA_UNIT);
-        TRX_GL_TRACK_UNIFORM(
-            glUniform1i,
-            Output_Shader_LookupUniform(shader->base[i], "uShadeData"),
-            M_SHADE_DATA_UNIT);
-        TRX_GL_TRACK_UNIFORM(
-            glUniform1i,
-            Output_Shader_LookupUniform(shader->base[i], "uGeomColors"),
-            M_GEOM_COLORS_UNIT);
+        // The mesh buffers a batch reads its vertices from.
+        if (TRX_GL_HAS_BATCHING) {
+            TRX_GL_TRACK_UNIFORM(
+                glUniform1i,
+                Output_Shader_LookupUniform(shader->base[i], "uGeomData"),
+                M_GEOM_DATA_UNIT);
+            TRX_GL_TRACK_UNIFORM(
+                glUniform1i,
+                Output_Shader_LookupUniform(shader->base[i], "uTexData"),
+                M_TEX_DATA_UNIT);
+            TRX_GL_TRACK_UNIFORM(
+                glUniform1i,
+                Output_Shader_LookupUniform(shader->base[i], "uShadeData"),
+                M_SHADE_DATA_UNIT);
+            TRX_GL_TRACK_UNIFORM(
+                glUniform1i,
+                Output_Shader_LookupUniform(shader->base[i], "uGeomColors"),
+                M_GEOM_COLORS_UNIT);
+        }
     }
 
     GLint align = 1;

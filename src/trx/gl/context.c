@@ -5,11 +5,11 @@
 #include <trx/core/strings.h>
 #include <trx/game/shell.h>
 #include <trx/game/viewport.h>
+#include <trx/gl/api.h>
 #include <trx/gl/renderer.h>
 #include <trx/gl/screenshot.h>
 #include <trx/gl/utils.h>
 
-#include <GL/glew.h>
 #include <SDL2/SDL_video.h>
 #include <stdint.h>
 #include <string.h>
@@ -160,9 +160,9 @@ RESULT TRX_GL_Context_Attach(void *window_handle)
     TRX_GL_CheckError();
 
     // VSync defaults to on unless user disabled it in runtime json
-    SDL_GL_SetSwapInterval(1);
+    TRX_GL_Context_SetVSync(true);
 
-#if DEBUG
+#if DEBUG && TRX_GL_HAS_DEBUG_OUTPUT
     if (glDebugMessageCallback != nullptr) {
         glDebugMessageCallback(M_GLDebug, nullptr);
     }
@@ -261,7 +261,9 @@ void TRX_GL_Context_SetLineWidth(const int32_t line_width)
 
 void TRX_GL_Context_SetVSync(bool vsync)
 {
-    SDL_GL_SetSwapInterval(vsync);
+    if (TRX_GL_HAS_SWAP_INTERVAL) {
+        SDL_GL_SetSwapInterval(vsync);
+    }
 }
 
 void *TRX_GL_Context_GetWindowHandle(void)

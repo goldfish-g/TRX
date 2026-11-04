@@ -5,8 +5,7 @@
 #include <trx/game/output/uniforms.h>
 #include <trx/game/rooms.h>
 #include <trx/game/viewport.h>
-
-#include <GL/glew.h>
+#include <trx/gl/api.h>
 
 void Output_SetSkyboxEnabled(bool enabled);
 bool Output_IsSkyboxEnabled(void);

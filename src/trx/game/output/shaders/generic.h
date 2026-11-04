@@ -1,8 +1,7 @@
 #pragma once
 
 #include <trx/core/result.h>
-
-#include <GL/glew.h>
+#include <trx/gl/api.h>
 
 typedef struct OUTPUT_SHADER OUTPUT_SHADER;
 

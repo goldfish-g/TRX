@@ -52,32 +52,64 @@ int gSlot;
 #define I_ROOM_LIGHT_MODE int(uInstances[gSlot].room.x)
 #define I_LIGHT(n) uInstances[gSlot].light[n]
 
-// One definition of what the mesh stages hand each other. The geometry stage
-// is optional, so the vertex stage names its block after whichever stage reads
-// it: a block is matched across stages by its name, and a stage cannot declare
-// an input block and an output block under one name.
-#define MESH_VARYINGS             \
-    vec4 eyePos;                  \
-    vec3 normal;                  \
-    flat uint flags;              \
-    flat int texLayer;            \
-    vec2 texUV;                   \
-    flat vec4 atlasSize;          \
-    vec2 trapezoidRatios;         \
-    vec4 color;                   \
-    vec3 add;                     \
-    float tintWeight;             \
-    float worldY;                 \
-    vec3 colorSub;                \
-    vec3 addSub;                  \
-    flat float reflectivity;      \
-    noperspective vec4 affineUV;  \
-    flat int slot;
+// GLSL ES interpolates every varying with perspective, so the browser build
+// maps the faces with perspective even where affine mapping asks otherwise.
+#ifdef GL_ES
+    #define NOPERSPECTIVE smooth
+#else
+    #define NOPERSPECTIVE noperspective
+#endif
 
+// One definition of what the mesh stages hand each other, as the
+// interpolation, type and member name of each, and the name of the varying
+// that carries it where the stages cannot use a block.
+#define MESH_VARYINGS(X)                                  \
+    X(smooth, vec4, eyePos, vEyePos)                      \
+    X(smooth, vec3, normal, vNormal)                      \
+    X(flat, uint, flags, vFlags)                          \
+    X(flat, int, texLayer, vTexLayer)                     \
+    X(smooth, vec2, texUV, vTexUV)                        \
+    X(flat, vec4, atlasSize, vAtlasSize)                  \
+    X(smooth, vec2, trapezoidRatios, vTrapezoidRatios)    \
+    X(smooth, vec4, color, vColor)                        \
+    X(smooth, vec3, add, vAdd)                            \
+    X(smooth, float, tintWeight, vTintWeight)             \
+    X(smooth, float, worldY, vWorldY)                     \
+    X(smooth, vec3, colorSub, vColorSub)                  \
+    X(smooth, vec3, addSub, vAddSub)                      \
+    X(flat, float, reflectivity, vReflectivity)           \
+    X(NOPERSPECTIVE, vec4, affineUV, vAffineUV)           \
+    X(flat, int, slot, vSlot)
+
+#define MESH_BLOCK_MEMBER(qualifier, type, member, varying) \
+    qualifier type member;
+
+// The geometry stage is optional, so the vertex stage names its block after
+// whichever stage reads it: a block is matched across stages by its name, and
+// a stage cannot declare an input block and an output block under one name.
 #ifdef SUBDIVIDE
     #define MESH_VS_BLOCK VertexData
 #else
     #define MESH_VS_BLOCK GeomData
+#endif
+
+// GLSL ES has no blocks to hand over between stages, so each member travels
+// as a varying of its own, gathered into a struct of the same shape at either
+// end. The stages then read gOut and gIn the same way on every platform.
+#ifdef GL_ES
+    #define MESH_STRUCT_MEMBER(qualifier, type, member, varying) type member;
+    #define MESH_VARYING_OUT(qualifier, type, member, varying) \
+        qualifier out type varying;
+    #define MESH_VARYING_IN(qualifier, type, member, varying) \
+        qualifier in type varying;
+    #define MESH_VARYING_STORE(qualifier, type, member, varying) \
+        varying = gOut.member;
+    #define MESH_VARYING_LOAD(qualifier, type, member, varying) \
+        gIn.member = varying;
+
+struct MeshVaryings {
+    MESH_VARYINGS(MESH_STRUCT_MEMBER)
+};
 #endif
 
 #ifdef VERTEX
@@ -101,7 +133,9 @@ layout(location = 10) in float aTintFactor;
 // instances at once. Its gl_VertexID holds a vertex of the mesh buffers,
 // counted from uVertexBase, in the low 24 bits and the slot of its instance
 // in the high bits, and the vertex is read from the buffers rather than from
-// the attributes.
+// the attributes. GLSL ES has no buffer textures to read them through, so
+// there every instance draws on its own, from the attributes.
+#ifndef GL_ES
 uniform bool uPullVertices;
 uniform int uVertexBase;
 uniform usamplerBuffer uGeomData;
@@ -114,9 +148,10 @@ uniform usamplerBuffer uShadeData;
 // How many 32-bit words a vertex takes in each mesh buffer. Matches
 // M_MESH_GEOM, M_MESH_TEXTURE and M_MESH_SHADE in
 // src/trx/game/output/mesh_batcher/batcher.c.
-#define GEOM_WORDS 11
-#define TEX_WORDS 12
-#define SHADE_WORDS 1
+    #define GEOM_WORDS 11
+    #define TEX_WORDS 12
+    #define SHADE_WORDS 1
+#endif
 
 vec4 inPosition;
 vec4 inNormal;
@@ -130,6 +165,7 @@ float inReflectivity;
 vec2 inUVScroll;
 float inTintFactor;
 
+#ifndef GL_ES
 float fetchFloat(usamplerBuffer data, int word)
 {
     return uintBitsToFloat(texelFetch(data, word).r);
@@ -147,24 +183,8 @@ vec4 fetchVec4(usamplerBuffer data, int word)
         fetchFloat(data, word + 2), fetchFloat(data, word + 3));
 }
 
-void loadVertex(void)
+void pullVertex(void)
 {
-    if (!uPullVertices) {
-        gSlot = 0;
-        inPosition = aPosition;
-        inNormal = aNormal;
-        inUVW = aUVW;
-        inTextureSize = aTextureSize;
-        inTrapezoidRatios = aTrapezoidRatios;
-        inFlags = aFlags;
-        inColor = aColor;
-        inShade = aShade;
-        inReflectivity = aReflectivity;
-        inUVScroll = aUVScroll;
-        inTintFactor = aTintFactor;
-        return;
-    }
-
     uint id = uint(gl_VertexID);
     gSlot = int(id >> 24u);
     int vertex = uVertexBase + int(id & 0xFFFFFFu);
@@ -187,10 +207,39 @@ void loadVertex(void)
 
     inShade = fetchFloat(uShadeData, vertex * SHADE_WORDS);
 }
+#endif
 
+void loadVertex(void)
+{
+#ifndef GL_ES
+    if (uPullVertices) {
+        pullVertex();
+        return;
+    }
+#endif
+
+    gSlot = 0;
+    inPosition = aPosition;
+    inNormal = aNormal;
+    inUVW = aUVW;
+    inTextureSize = aTextureSize;
+    inTrapezoidRatios = aTrapezoidRatios;
+    inFlags = aFlags;
+    inColor = aColor;
+    inShade = aShade;
+    inReflectivity = aReflectivity;
+    inUVScroll = aUVScroll;
+    inTintFactor = aTintFactor;
+}
+
+#ifdef GL_ES
+MESH_VARYINGS(MESH_VARYING_OUT)
+MeshVaryings gOut;
+#else
 out MESH_VS_BLOCK {
-    MESH_VARYINGS
+    MESH_VARYINGS(MESH_BLOCK_MEMBER)
 } gOut;
+#endif
 
 vec3 gammaCurve(vec3 rgb, float gamma_exp)
 {
@@ -526,6 +575,10 @@ void main(void) {
         gOut.color.rgb = mix(gOut.color.rgb, uFogColor.rgb, fogFactor);
         gOut.add *= 1.0 - fogFactor;
     }
+
+#ifdef GL_ES
+    MESH_VARYINGS(MESH_VARYING_STORE)
+#endif
 }
 
 #elif defined(GEOMETRY)
@@ -534,11 +587,11 @@ layout(triangles) in;
 layout(triangle_strip, max_vertices = 24) out;
 
 in VertexData {
-    MESH_VARYINGS
+    MESH_VARYINGS(MESH_BLOCK_MEMBER)
 } gIn[];
 
 out GeomData {
-    MESH_VARYINGS
+    MESH_VARYINGS(MESH_BLOCK_MEMBER)
 } gOut;
 
 // How far, in pixels, the flat mapping puts a texel from where perspective
@@ -664,9 +717,14 @@ uniform vec2 uEnvMapUV1;
 uniform int uEnvMapLayer;
 #endif
 
+#ifdef GL_ES
+MESH_VARYINGS(MESH_VARYING_IN)
+MeshVaryings gIn;
+#else
 in GeomData {
-    MESH_VARYINGS
+    MESH_VARYINGS(MESH_BLOCK_MEMBER)
 } gIn;
+#endif
 out vec4 outColor;
 
 vec4 applyFog(vec4 color, float dist)
@@ -753,6 +811,9 @@ vec4 applyFogBulbs(vec4 color)
 }
 
 void main(void) {
+#ifdef GL_ES
+    MESH_VARYINGS(MESH_VARYING_LOAD)
+#endif
     gSlot = gIn.slot;
     // How much of the fragment lies under the water surface, from 0 above it
     // to 1 below it. Y grows downwards, so a fragment past the line is the

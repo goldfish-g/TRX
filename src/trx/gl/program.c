@@ -160,7 +160,6 @@ static char *M_Preprocess(
 {
     ASSERT(content != nullptr);
 
-    const char *const version_ogl33c = "#version 330 core\n";
     const char *stage_define = "";
     if (type == GL_VERTEX_SHADER) {
         stage_define = "#define VERTEX\n";
@@ -170,11 +169,11 @@ static char *M_Preprocess(
         stage_define = "#define FRAGMENT\n";
     }
 
-    const size_t bufsize = strlen(version_ogl33c) + strlen(stage_define)
+    const size_t bufsize = strlen(TRX_GL_SHADER_PRELUDE) + strlen(stage_define)
         + (defines != nullptr ? strlen(defines) : 0) + strlen(content) + 1;
 
     char *const processed_content = Memory_Alloc(bufsize);
-    strcpy(processed_content, version_ogl33c);
+    strcpy(processed_content, TRX_GL_SHADER_PRELUDE);
     strcat(processed_content, stage_define);
     if (defines != nullptr) {
         strcat(processed_content, defines);
