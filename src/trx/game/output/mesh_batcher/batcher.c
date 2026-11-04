@@ -417,6 +417,15 @@ static void M_SortTransparentFaces(const MESH_BATCHER *const batcher)
     g_TRX_GL_Metrics.trans_sort_count += n;
 }
 
+static void M_CopyIndices(
+    uint32_t *const dst, const VECTOR *const src, const int32_t vertex_start)
+{
+    const uint32_t *const indices = Vector_GetData(src);
+    for (int32_t i = 0; i < src->count; i++) {
+        dst[i] = indices[i] + vertex_start;
+    }
+}
+
 static void M_DrawOpaqueRun(
     const M_MESH_BUF_BINDING *const bind, const int32_t index_start,
     const int32_t index_count)
@@ -424,9 +433,9 @@ static void M_DrawOpaqueRun(
     if (index_count <= 0) {
         return;
     }
-    glDrawElementsBaseVertex(
+    glDrawElements(
         GL_TRIANGLES, index_count, GL_UNSIGNED_INT,
-        (void *)(intptr_t)(index_start * sizeof(uint32_t)), bind->vertex_start);
+        (void *)(intptr_t)(index_start * sizeof(uint32_t)));
     TRX_GL_CheckError();
     g_TRX_GL_Metrics.opaque_vert_count += index_count;
     g_TRX_GL_Metrics.opaque_draw_count++;
@@ -451,13 +460,11 @@ static void M_DrawBlendAddVertices(
     const MESH_BATCHER *const batcher, const MESH_INSTANCE *const inst)
 {
     M_MESH_BUF_BINDING *const bind = M_GetBinding(batcher, inst->mesh);
-    const void *indices_offset =
+    const void *const indices_offset =
         (void *)(intptr_t)(bind->blend_add_index_start * sizeof(uint32_t));
-    glDrawElementsBaseVertex(
+    glDrawElements(
         GL_TRIANGLES, bind->blend_add_index_count, GL_UNSIGNED_INT,
-        indices_offset, // Offset in EBO
-        bind->vertex_start // Offset in VBO (baseVertex)
-    );
+        indices_offset);
     TRX_GL_CheckError();
     g_TRX_GL_Metrics.blend_add_vert_count += bind->blend_add_index_count;
     g_TRX_GL_Metrics.blend_add_draw_count++;
@@ -759,18 +766,17 @@ static int32_t M_PlaceInBatch(
 }
 
 // Adds faces of an instance to a run of the open batch, by where their
-// indices sit in a static index buffer. The indices count their vertices
-// from index_vertex, and the base vertex of the draw adds the window and the
-// slot.
+// indices sit in a static index buffer. The indices count their vertices from
+// the start of the mesh buffers, and the base vertex of the draw takes them
+// into the window and adds the slot.
 static void M_AddStaticFaces(
     MESH_BATCHER *const batcher, M_BATCH_STEP *const open, const int32_t run,
     const MESH_INSTANCE *const inst, const M_MESH_BUF_BINDING *const bind,
-    const int32_t index_start, const int32_t index_count,
-    const int32_t index_vertex)
+    const int32_t index_start, const int32_t index_count)
 {
     const int32_t slot_idx = M_PlaceInBatch(batcher, open, inst, bind);
-    const GLint base_vertex = index_vertex - open->vertex_base
-        + (GLint)((uint32_t)slot_idx << M_BATCH_VERTEX_BITS);
+    const GLint base_vertex =
+        -open->vertex_base + (GLint)((uint32_t)slot_idx << M_BATCH_VERTEX_BITS);
     M_AddDraw(batcher, open, run, index_start, index_count, base_vertex);
 }
 
@@ -996,8 +1002,7 @@ static void M_BuildOpaqueSteps(MESH_BATCHER *const batcher)
         for (int32_t run = 0; run < M_RUN_COUNT; run++) {
             if (counts[run] > 0) {
                 M_AddStaticFaces(
-                    batcher, &open, run, inst, bind, starts[run], counts[run],
-                    bind->vertex_start);
+                    batcher, &open, run, inst, bind, starts[run], counts[run]);
             }
         }
     }
@@ -1756,21 +1761,14 @@ void MeshBatcher_Seal(MESH_BATCHER *const batcher)
         M_MESH_BUF_BINDING *const bind =
             *(M_MESH_BUF_BINDING **)Vector_Get(batcher->bindings, i);
 
-        // Copy Opaque Indices
-        if (bind->opaque_index_count > 0) {
-            memcpy(
-                &opaque_indices[bind->opaque_index_start],
-                Vector_GetData(bind->mesh->opaque_vertex_indices),
-                bind->opaque_index_count * sizeof(uint32_t));
-        }
-
-        // Copy Blend Indices
-        if (bind->blend_add_index_count > 0) {
-            memcpy(
-                &blend_indices[bind->blend_add_index_start],
-                Vector_GetData(bind->mesh->blend_add_vertex_indices),
-                bind->blend_add_index_count * sizeof(uint32_t));
-        }
+        // Every index buffer counts its vertices from the start of the mesh
+        // buffers, so that a draw of a single instance needs no base vertex.
+        M_CopyIndices(
+            &opaque_indices[bind->opaque_index_start],
+            bind->mesh->opaque_vertex_indices, bind->vertex_start);
+        M_CopyIndices(
+            &blend_indices[bind->blend_add_index_start],
+            bind->mesh->blend_add_vertex_indices, bind->vertex_start);
 
         // Copy Transparent Indices
         if (bind->transparent_index_count > 0) {
