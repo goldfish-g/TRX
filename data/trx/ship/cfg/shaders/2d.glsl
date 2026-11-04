@@ -9,9 +9,9 @@
 #define WAVE_TILE_PHASE_SHORT vec2(67.5, 73.0)
 #define WAVE_TILE_PHASE_LONG vec2(33.94, 28.31)
 #define WAVE_LIGHT_DELTA 0.125
-#define WAVE_Y_TILES 6
+#define WAVE_Y_TILES 6.0
 #define WAVE_ORBIT_RADIUS 0.2
-#define WAVE_FPS_DRIFT 25 / 30
+#define WAVE_FPS_DRIFT (25.0 / 30.0)
 
 #define BLUR_MAX_RADIUS 0.03 // fraction of the image height
 #define BLUR_TAPS 3          // taps on each side of the centre, per axis
@@ -48,7 +48,7 @@ void main() {
         float shortAng = radians((uTime * WAVE_FPS_DRIFT)  * WAVE_SPEED_SHORT + shortPhase);
         float longAng = radians((uTime * WAVE_FPS_DRIFT) * WAVE_SPEED_LONG + longPhase);
 
-        float viewportSizeNDC = (1 + edgeOffset * 2);
+        float viewportSizeNDC = (1.0 + edgeOffset * 2.0);
         vec2 tileSize = viewportSizeNDC / repeat;
         vec2 vertexOffset = vec2(cos(shortAng), sin(shortAng)) * tileSize * WAVE_ORBIT_RADIUS;
         vertLight = 0.5 + (sin(shortAng) + sin(longAng)) * WAVE_LIGHT_DELTA;

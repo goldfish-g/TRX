@@ -256,7 +256,7 @@ vec3 waterWibble(vec4 worldPosition, vec4 screenPosition)
     vec3 ndc = screenPosition.xyz / screenPosition.w;
     vec2 pixelPos = (ndc.xy * 0.5 + 0.5) * uViewportSize;
 #if TR_VERSION == 3
-    float phases = (uTimeInGame * 0.5 + length(worldPosition.xyz)) * (2.0 * PI / WIBBLE_SIZE);
+    float phases = (uTimeInGame * 0.5 + length(worldPosition.xyz)) * (2.0 * PI / float(WIBBLE_SIZE));
     pixelPos.y += sin(phases) * wibbleScale();
 #elif TR_VERSION == 4
     float phase = uTimeInGame * 4.0;
@@ -265,8 +265,8 @@ vec3 waterWibble(vec4 worldPosition, vec4 screenPosition)
     pixelPos.x += wibbleTable(phase, srcPos.y, scale);
     pixelPos.y += wibbleTable(phase, srcPos.x, scale);
 #else
-    float phases = (uTimeInGame + length(worldPosition.xyz)) * (2.0 * PI / WIBBLE_SIZE);
-    float amplitude = MAX_WIBBLE * float(uSupersamplingFactor);
+    float phases = (uTimeInGame + length(worldPosition.xyz)) * (2.0 * PI / float(WIBBLE_SIZE));
+    float amplitude = float(MAX_WIBBLE) * float(uSupersamplingFactor);
     pixelPos.x += sin(phases) * amplitude;
     pixelPos.y += cos(phases) * amplitude;
 #endif
