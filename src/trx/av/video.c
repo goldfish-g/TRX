@@ -1967,15 +1967,18 @@ void Video_PumpEvents(VIDEO *video)
 {
     M_STATE *const is = video->priv;
 
-    if (is->remaining_time > 0.0) {
-        av_usleep((int64_t)(is->remaining_time * 1000000.0));
-    }
     is->remaining_time = REFRESH_RATE;
     if (!is->paused || is->force_refresh) {
         M_VideoRefresh(is, &is->remaining_time);
     }
 
     video->is_playing = !is->abort_request && !is->playback_finished;
+}
+
+double Video_GetTimeToNextFrame(const VIDEO *const video)
+{
+    const M_STATE *const is = video->priv;
+    return is->remaining_time;
 }
 
 void Video_SetAudioEnabled(VIDEO *const video, const bool enabled)

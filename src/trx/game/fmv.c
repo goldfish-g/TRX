@@ -27,6 +27,7 @@
 #include <trx/game/ui/touch_overlay.h>
 #include <trx/game/viewport.h>
 
+#include <math.h>
 #include <string.h>
 
 typedef struct {
@@ -278,6 +279,10 @@ static RESULT M_Play(const char *const file_name)
         }
 
         Video_PumpEvents(video);
+        // Waiting through the clock until the next frame is due lets the
+        // platform have its turn, where a browser plays the sound and takes
+        // the input.
+        Clock_Delay((int32_t)ceil(Video_GetTimeToNextFrame(video) * 1000.0));
 
         // At 60 FPS a tick lasts two frames, as it does in play, so the pause
         // screen draws a frame between two ticks before the next one.

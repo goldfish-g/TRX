@@ -56,4 +56,7 @@ void Video_SetPaused(VIDEO *video, bool paused);
 void Video_Start(VIDEO *video);
 void Video_Stop(VIDEO *video);
 void Video_PumpEvents(VIDEO *video);
+// How long until the next frame is due, in seconds. Pumping again sooner
+// shows nothing new.
+double Video_GetTimeToNextFrame(const VIDEO *video);
 void Video_Close(VIDEO *video);
