@@ -5,9 +5,14 @@
 #include <SDL2/SDL_audio.h>
 #include <libavformat/avformat.h>
 
+#ifdef __EMSCRIPTEN__
+    #include <trx/av/audio_emscripten.h>
+#else
+    #include <trx/av/audio_generic.h>
+#endif
+
 #define AUDIO_WORKING_RATE 44100
 #define AUDIO_WORKING_FORMAT AUDIO_F32
-#define AUDIO_SAMPLES 500
 #define AUDIO_WORKING_CHANNELS 2
 #define AUDIO_FILTER_STAGES 2
 
