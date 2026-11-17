@@ -18,6 +18,7 @@ def generate_version(repo_dir: Path | None = None) -> str:
 
 def generate_package_name(engine_version: str, platform: str) -> str:
     platform = {
+        "linux-arm64": "Linux_ARM64",
         "win": "Windows",
         "win-installer": "Windows_Installer",
         "webgl": "WebGL",

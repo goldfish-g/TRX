@@ -103,9 +103,14 @@ RUN git clone \
     https://github.com/FFmpeg/FFmpeg
 RUN cd FFmpeg && git checkout 066432ebcf
 COPY ./tools/ffmpeg_flags.txt /tmp/ffmpeg_flags.txt
+# the image builds for the machine it is built on
 RUN cd FFmpeg \
+    && case "$(uname -m)" in \
+        aarch64) ffmpeg_arch=aarch64 ;; \
+        *) ffmpeg_arch=x86 ;; \
+    esac \
     && ./configure \
-        --arch=x86 \
+        --arch=$ffmpeg_arch \
         --prefix=/ext/ \
         --enable-static \
         --disable-shared \

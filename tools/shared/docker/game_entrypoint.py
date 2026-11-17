@@ -55,7 +55,7 @@ class PackageOptions(BaseOptions):
 
     @property
     def release_zip_files(self) -> list[tuple[Path, str]]:
-        if self.platform == "linux":
+        if self.platform in ("linux", "linux-arm64"):
             return [(self.build_root / "TRX", "TRX")]
 
         elif self.platform == "win":
