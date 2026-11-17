@@ -36,6 +36,16 @@ Depending on your system, the Docker package may be named `docker`,
 
 The built files will be placed in the `build/` directory.
 
+### Building for arm64
+
+The Linux toolchain image builds for the machine it runs on. On an arm64 host,
+use the `linux-arm64` recipes, which keep their image, build directory
+(`build/trx/linux-arm64/`) and package name apart from the x86 ones:
+
+```bash
+just trx-build-linux-arm64 target='debug'
+```
+
 ## Other build methods
 
 The Docker workflow above is the recommended way to build TRX on Linux.
