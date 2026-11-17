@@ -21,7 +21,6 @@
 #include <X11/Xlib.h>
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -218,12 +217,11 @@ int main(const int argc, char **const argv)
     glXQueryContext(display, glx_context, GLX_FBCONFIG_ID, &fb_config_id);
     const int fb_attribs[] = { GLX_FBCONFIG_ID, fb_config_id, None };
     int fb_count = 0;
-    GLXFBConfig *const fb_configs =
-        glXChooseFBConfig(display, DefaultScreen(display), fb_attribs, &fb_count);
+    GLXFBConfig *const fb_configs = glXChooseFBConfig(
+        display, DefaultScreen(display), fb_attribs, &fb_count);
     int visual_id = 0;
     if (fb_count > 0) {
-        glXGetFBConfigAttrib(
-            display, fb_configs[0], GLX_VISUAL_ID, &visual_id);
+        glXGetFBConfigAttrib(display, fb_configs[0], GLX_VISUAL_ID, &visual_id);
     }
 
     const XrGraphicsBindingOpenGLXlibKHR binding = {
@@ -320,8 +318,7 @@ int main(const int argc, char **const argv)
             return 1;
         }
         SDL_Event sdl_event;
-        while (SDL_PollEvent(&sdl_event)) {
-        }
+        while (SDL_PollEvent(&sdl_event)) {}
 
         XrEventDataBuffer event = { .type = XR_TYPE_EVENT_DATA_BUFFER };
         while (xrPollEvent(m_Instance, &event) == XR_SUCCESS) {
