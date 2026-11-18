@@ -810,6 +810,39 @@ vec4 applyFogBulbs(vec4 color)
     return color;
 }
 
+// Reads the atlas for a fragment. The textures are drawn with their texels
+// showing, unsmoothed, which is how they look up close. Far away, where a
+// pixel covers more than one texel, picking a single texel makes the
+// surface crawl as the view moves: which texel a pixel lands on changes
+// from frame to frame. There the pixel takes the average of several
+// places within it, which holds still, and nothing changes where a texel
+// is as large as a pixel or larger.
+vec4 sampleAtlas(
+    vec3 texCoords, vec2 uvPerX, vec2 uvPerY, bool wraps, vec4 atlasSize)
+{
+    vec2 size = vec2(textureSize(uTexAtlas, 0).xy);
+    float texelsPerPixel =
+        max(length(uvPerX * size), length(uvPerY * size));
+    if (texelsPerPixel <= 1.0) {
+        return texture(uTexAtlas, texCoords);
+    }
+    // Places spread evenly over the pixel, none in line with another.
+    const vec2 places[8] = vec2[8](
+        vec2(0.0625, -0.1875), vec2(-0.0625, 0.1875),
+        vec2(0.3125, 0.0625), vec2(-0.1875, -0.3125),
+        vec2(-0.3125, 0.3125), vec2(-0.4375, -0.0625),
+        vec2(0.1875, 0.4375), vec2(0.4375, -0.4375));
+    vec4 sum = vec4(0.0);
+    for (int i = 0; i < 8; i++) {
+        vec2 uv = texCoords.xy + uvPerX * places[i].x + uvPerY * places[i].y;
+        if (!wraps) {
+            uv = clampTexAtlas(uv, atlasSize);
+        }
+        sum += textureLod(uTexAtlas, vec3(uv, texCoords.z), 0.0);
+    }
+    return sum / 8.0;
+}
+
 void main(void) {
 #ifdef GL_ES
     MESH_VARYINGS(MESH_VARYING_LOAD)
@@ -852,10 +885,17 @@ void main(void) {
         if (uTrapezoidFilterEnabled != 0) {
             texCoords.xy /= affine ? gIn.affineUV.zw : gIn.trapezoidRatios;
         }
-        if ((gIn.flags & VERT_TEX_WRAP) == 0u) {
+        bool wraps = (gIn.flags & VERT_TEX_WRAP) != 0u;
+        // How far the texture moves from one pixel to the next, taken
+        // before the coordinates are held inside their tile, where they
+        // stop moving.
+        vec2 uvPerX = dFdx(texCoords.xy);
+        vec2 uvPerY = dFdy(texCoords.xy);
+        if (!wraps) {
             texCoords.xy = clampTexAtlas(texCoords.xy, gIn.atlasSize);
         }
-        texColor *= texture(uTexAtlas, texCoords);
+        texColor *= sampleAtlas(
+            texCoords, uvPerX, uvPerY, wraps, gIn.atlasSize);
     } else {
         texColor.rgb *= texColor.a;
     }
