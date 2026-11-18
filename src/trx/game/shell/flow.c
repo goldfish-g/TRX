@@ -27,6 +27,7 @@
 #include <trx/gl/api.h>
 #include <trx/gl/context.h>
 #include <trx/version.h>
+#include <trx/vr/session.h>
 
 #include <SDL2/SDL.h>
 #include <stdio.h>
@@ -38,6 +39,7 @@ static char *m_PendingMod = nullptr;
 // Flags preserved across mod switches (needed to rebuild args in main()).
 static bool m_PrevHeadless = false;
 static bool m_PrevQuiet = false;
+static bool m_PrevVR = false;
 
 // Set while a replay runs a stretch with the drawing off.
 static bool m_DrawingSkipped = false;
@@ -129,6 +131,10 @@ static RESULT M_SetupSDL(void)
     LOG_INFO(
         "SDL version: %d.%d.%d", compiled.major, compiled.minor,
         compiled.patch);
+    const SHELL_ARGS *const args = Shell_GetArgs();
+    if (args != nullptr && args->vr) {
+        VR_Session_PrepareSDL();
+    }
     FAIL_IF(
         SDL_Init(SDL_INIT_EVENTS | SDL_INIT_VIDEO) < 0,
         "SDL could not be brought up: %s", SDL_GetError());
@@ -328,6 +334,11 @@ bool Shell_GetPrevQuiet(void)
     return m_PrevQuiet;
 }
 
+bool Shell_GetPrevVR(void)
+{
+    return m_PrevVR;
+}
+
 const SHELL_ARGS *Shell_GetArgs(void)
 {
     return m_Session != nullptr ? m_Session->args : nullptr;
@@ -379,6 +390,12 @@ int32_t Shell_Main(const SHELL_ARGS *const args)
     GamePath_Init(s->args);
     EXIT_ON_FAIL(M_CreateGameWindow(), "TRX could not open a window");
     EXIT_ON_FAIL(M_CreateGLContext(), "TRX cannot draw the game");
+    if (s->args->vr) {
+        // Without a headset the game still plays in its window.
+        SHOULD(
+            VR_Session_Start(m_Window),
+            "the game will not be shown in a headset");
+    }
     EXIT_ON_FAIL(Output_Init(), "TRX cannot draw the game");
     if (s->args->headless) {
         Shell_RefreshRendererViewport();
@@ -433,6 +450,7 @@ int32_t Shell_Main(const SHELL_ARGS *const args)
         // session (which owns and will free the args struct).
         m_PrevHeadless = s->args->headless;
         m_PrevQuiet = s->args->quiet;
+        m_PrevVR = s->args->vr;
         M_ShutdownModules();
         ShellSession_Free(m_Session);
         m_Session = nullptr;
@@ -446,6 +464,7 @@ int32_t Shell_Main(const SHELL_ARGS *const args)
 void Shell_Shutdown(void)
 {
     M_ShutdownModules();
+    VR_Session_Stop();
     TRX_GL_Context_Detach();
     Log_Shutdown();
     if (m_Session != nullptr) {

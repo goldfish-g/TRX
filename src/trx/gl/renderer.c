@@ -15,6 +15,7 @@
 #include <trx/gl/texture.h>
 #include <trx/gl/utils.h>
 #include <trx/gl/vertex_array.h>
+#include <trx/vr/session.h>
 
 #include <SDL2/SDL_video.h>
 #include <stdint.h>
@@ -299,6 +300,23 @@ static void M_Render(TRX_GL_RENDERER *renderer)
     }
 }
 
+// Shows the frame on the screen in the headset, where there is one. The
+// window still gets the frame after this, as a mirror.
+static void M_PresentToHeadset(M_CONTEXT *const p)
+{
+    VR_SCREEN screen;
+    if (!VR_Session_BeginFrame(&screen)) {
+        return;
+    }
+    if (screen.fbo != 0) {
+        M_Composite(
+            p, screen.fbo,
+            (VIEWPORT_RECT) { .width = screen.width, .height = screen.height });
+    }
+    const VIEWPORT_RECT target = Viewport_GetRect(VIEWPORT_TARGET);
+    VR_Session_EndFrame((float)target.width / (float)MAX(target.height, 1));
+}
+
 // The framebuffers keep the frame that was just presented until the next one
 // draws over them, so that frame can be composited a second time for a
 // snapshot. Output_BeginScene is what prepares them for the next frame.
@@ -306,6 +324,7 @@ static void M_SwapBuffers(TRX_GL_RENDERER *const renderer)
 {
     M_CONTEXT *const p = renderer->priv;
 
+    M_PresentToHeadset(p);
     M_Render(renderer);
     if (p->is_output_blank) {
         glBindFramebuffer(GL_FRAMEBUFFER, 0);

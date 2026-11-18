@@ -33,6 +33,8 @@ typedef struct {
     const char *test_record_path;
     const char *test_replay_path;
     bool headless;
+    // Whether to show the game in a VR headset.
+    bool vr;
     bool debug_render_performance;
     int32_t headless_fps; // in headless mode, force fixed fps (0 = unlocked)
     bool quiet;

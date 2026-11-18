@@ -1030,6 +1030,18 @@ endif
 
 # A module that differs by platform builds from <module>_<platform>.c.
 platform = host_machine.system() == 'emscripten' ? 'emscripten' : 'generic'
+# A headset is reached through OpenXR, which shares the game's OpenGL context
+# through X11. GLEW already brings X11 along, and what the session calls of it
+# needs xcb underneath.
+if get_option('vr')
+  dependencies += [
+    dependency('openxr', static: staticdeps),
+    c_compiler.find_library('xcb', static: false),
+  ]
+  common_sources += ['trx/vr/session_openxr.c']
+else
+  common_sources += ['trx/vr/session_none.c']
+endif
 common_sources += [
   'trx/game/clock/clock_' + platform + '.c',
   'trx/game/shell/host_' + platform + '.c',

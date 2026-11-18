@@ -33,6 +33,7 @@ const char *Shell_GetPendingMod(void);
 void Shell_ClearPendingMod(void);
 bool Shell_GetPrevHeadless(void);
 bool Shell_GetPrevQuiet(void);
+bool Shell_GetPrevVR(void);
 const SHELL_ARGS *Shell_GetArgs(void);
 
 // Stops or resumes drawing while the game keeps running its logic frames.

@@ -9,6 +9,7 @@
 #include <trx/gl/renderer.h>
 #include <trx/gl/screenshot.h>
 #include <trx/gl/utils.h>
+#include <trx/vr/session.h>
 
 #include <SDL2/SDL_video.h>
 #include <stdint.h>
@@ -262,7 +263,9 @@ void TRX_GL_Context_SetLineWidth(const int32_t line_width)
 void TRX_GL_Context_SetVSync(bool vsync)
 {
     if (TRX_GL_HAS_SWAP_INTERVAL) {
-        SDL_GL_SetSwapInterval(vsync);
+        // A headset says when a frame is due, and a window that waits for
+        // the display as well would hold its frames back.
+        SDL_GL_SetSwapInterval(vsync && !VR_Session_IsActive());
     }
 }
 
