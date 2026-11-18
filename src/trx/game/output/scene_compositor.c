@@ -211,6 +211,34 @@ static void M_RenderWorldPasses(const M_PRIV *const p)
     }
 }
 
+// Clears the depth of the eye's picture, and its colors too where asked,
+// only as far as the picture is drawn: the eyes are drawn smaller than their
+// framebuffers while the scene is costly, and the rest is never shown. A
+// clear costs the graphics card as much for the part that is not shown as
+// for the part that is. A couple of pixels more are cleared, for a headset
+// that blends the pixels at the edge with their neighbours.
+#define M_EYE_CLEAR_MARGIN 2
+
+static void M_ClearEye(const M_PRIV *const p, const bool with_colors)
+{
+    GLint old_box[4];
+    glGetIntegerv(GL_SCISSOR_BOX, old_box);
+    const GLboolean had_scissor = glIsEnabled(GL_SCISSOR_TEST);
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(
+        0, 0, p->eye_target.width + M_EYE_CLEAR_MARGIN,
+        p->eye_target.height + M_EYE_CLEAR_MARGIN);
+    if (with_colors) {
+        const RGBA_F background = Output_GetBackgroundColor();
+        glClearBufferfv(GL_COLOR, 0, &background.r);
+    }
+    glClear(GL_DEPTH_BUFFER_BIT);
+    glScissor(old_box[0], old_box[1], old_box[2], old_box[3]);
+    if (!had_scissor) {
+        glDisable(GL_SCISSOR_TEST);
+    }
+}
+
 // Marks the parts of the eye's picture that its lens never shows as being
 // right in front of the eye, so that nothing of the world is drawn there.
 // The player cannot see them, and they are a good share of the picture. The
@@ -334,7 +362,7 @@ static void M_RenderWorldToEye(M_PRIV *const p)
     Output_Uniforms_UploadEyeMatrix(Output_GetUniforms(), &g_ViewMatrix, &view);
     M_RenderWorldPasses(p);
     // Each flush stands in front of the last, as on a screen.
-    glClear(GL_DEPTH_BUFFER_BIT);
+    M_ClearEye(p, false);
     M_HideUnseenParts(p);
     TRX_GL_Renderer_BindGeometryFbo();
     TRX_GL_Context_SwitchToViewport(VIEWPORT_GAME);
@@ -577,11 +605,9 @@ void SceneCompositor_BeginWorld(void)
         || !VR_Session_AcquireEye(eye, &p->eye_target)) {
         return;
     }
-    const RGBA_F background = Output_GetBackgroundColor();
     glBindFramebuffer(GL_FRAMEBUFFER, p->eye_target.fbo);
     glViewport(0, 0, p->eye_target.width, p->eye_target.height);
-    glClearBufferfv(GL_COLOR, 0, &background.r);
-    glClear(GL_DEPTH_BUFFER_BIT);
+    M_ClearEye(p, true);
     p->eye = eye;
     M_HideUnseenParts(p);
     TRX_GL_Renderer_BindGeometryFbo();
