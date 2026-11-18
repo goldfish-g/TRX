@@ -325,13 +325,20 @@ static void M_SwapBuffers(TRX_GL_RENDERER *const renderer)
     M_CONTEXT *const p = renderer->priv;
 
     M_PresentToHeadset(p);
-    M_Render(renderer);
-    if (p->is_output_blank) {
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        TRX_GL_Context_SwitchToViewport(VIEWPORT_WINDOW);
-        TRX_GL_Context_Clear();
+    // A window that is hidden while a headset shows the game has nobody to
+    // show a frame to, and presenting to it holds the headset's frames back.
+    SDL_Window *const window = TRX_GL_Context_GetWindowHandle();
+    const bool is_window_idle = VR_Session_IsActive()
+        && (SDL_GetWindowFlags(window) & SDL_WINDOW_HIDDEN) != 0;
+    if (!is_window_idle) {
+        M_Render(renderer);
+        if (p->is_output_blank) {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            TRX_GL_Context_SwitchToViewport(VIEWPORT_WINDOW);
+            TRX_GL_Context_Clear();
+        }
+        SDL_GL_SwapWindow(window);
     }
-    SDL_GL_SwapWindow(TRX_GL_Context_GetWindowHandle());
     M_UpdateFBOSizes(renderer);
 
     TRX_GL_FBO_Bind(p->geometry);

@@ -469,6 +469,19 @@ static SDL_GameController *M_FindController(void)
 
     int32_t controllers = SDL_NumJoysticks();
     LOG_INFO("%d controllers", controllers);
+    // The controllers of a VR headset are attached as a virtual gamepad, and
+    // are what the player holds while there is one.
+    for (int32_t i = 0; i < controllers; i++) {
+        if (SDL_JoystickIsVirtual(i) && SDL_IsGameController(i)) {
+            m_ControllerName = SDL_GameControllerNameForIndex(i);
+            m_ControllerType = SDL_GameControllerTypeForIndex(i);
+            SDL_GameController *const result = SDL_GameControllerOpen(i);
+            if (result != nullptr) {
+                LOG_INFO("using the %s", m_ControllerName);
+                return result;
+            }
+        }
+    }
     for (int32_t i = 0; i < controllers; i++) {
         m_ControllerName = SDL_GameControllerNameForIndex(i);
         m_ControllerType = SDL_GameControllerTypeForIndex(i);

@@ -52,6 +52,10 @@ Currently the following command line interface options are available:
   build with VR support and an OpenXR runtime; without a headset the game
   plays in its window.
 
+- `--vr-no-mirror`:  
+  Keeps the game window hidden while a headset shows the game. For headsets
+  that run the game themselves, which show the window as a second screen.
+
 - `--headless-fps <num>`:  
   In headless mode, forces the simulation to run at a constant FPS. If omitted
   or zero, uses the FPS from the configuration.

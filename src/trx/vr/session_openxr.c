@@ -1,12 +1,20 @@
-#include <trx/vr/session.h>
+// realpath and posix_spawn are POSIX, which the C standard alone leaves out.
+#define _GNU_SOURCE
 
 #include <trx/core/log.h>
+#include <trx/game/clock/const.h>
+#include <trx/vr/gamepad_openxr.h>
+#include <trx/vr/session.h>
 
 #include <GL/glx.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_syswm.h>
 #include <X11/Xlib.h>
+#include <math.h>
+#include <spawn.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define XR_USE_PLATFORM_XLIB
 #define XR_USE_GRAPHICS_API_OPENGL
@@ -33,6 +41,10 @@ typedef struct {
     XrInstance instance;
     XrSystemId system_id;
     XrSession session;
+    // Where the headset started, the player's head, and where the screen
+    // hangs. The last is the first, moved to where the player last looked.
+    XrSpace local_space;
+    XrSpace view_space;
     XrSpace space;
     XrSwapchain swapchain;
     XrSwapchainImageOpenGLKHR images[M_MAX_IMAGES];
@@ -41,6 +53,16 @@ typedef struct {
 
     // Whether the headset takes frames at the moment.
     bool is_running;
+    // Whether the session is over, and is closed before the next frame.
+    bool is_over;
+    bool needs_recenter;
+    // Whether the runtime is SteamVR, and whether its menu was already asked
+    // to step aside.
+    bool is_steamvr;
+    bool has_refresh_rates;
+    bool has_presence;
+    bool is_player_away;
+    bool is_menu_dismissed;
     // Whether the frame that is open has an image of the swapchain to give
     // back.
     bool has_image;
@@ -59,10 +81,83 @@ static const char *M_DescribeResult(const XrResult result)
     return name;
 }
 
+static bool M_HasExtension(const char *const name)
+{
+    uint32_t count = 0;
+    xrEnumerateInstanceExtensionProperties(nullptr, 0, &count, nullptr);
+    XrExtensionProperties *const props = calloc(count, sizeof(*props));
+    for (uint32_t i = 0; i < count; i++) {
+        props[i].type = XR_TYPE_EXTENSION_PROPERTIES;
+    }
+    xrEnumerateInstanceExtensionProperties(nullptr, count, &count, props);
+    bool found = false;
+    for (uint32_t i = 0; i < count; i++) {
+        found |= strcmp(props[i].extensionName, name) == 0;
+    }
+    free(props);
+    return found;
+}
+
+// SteamVR keeps its menu open over a game that was started from it, and the
+// game has neither the picture nor the controllers until the player closes
+// it. OpenXR has no way to ask for the menu to go, so SteamVR's own command
+// line tool is sent to do it, which sits next to the runtime.
+static void M_DismissSteamVRMenu(void)
+{
+    const char *const home = getenv("HOME");
+    char manifest[512];
+    char runtime_dir[512];
+    if (home == nullptr) {
+        return;
+    }
+    snprintf(
+        manifest, sizeof(manifest), "%s/.config/openxr/1/active_runtime.json",
+        home);
+    if (realpath(manifest, runtime_dir) == nullptr) {
+        return;
+    }
+    char *const slash = strrchr(runtime_dir, '/');
+    if (slash == nullptr) {
+        return;
+    }
+    *slash = '\0';
+
+#if defined(__aarch64__)
+    const char *const arch = "linuxarm64";
+#else
+    const char *const arch = "linux64";
+#endif
+    char tool[600];
+    snprintf(tool, sizeof(tool), "%s/bin/%s/vrcmd", runtime_dir, arch);
+    char *const argv[] = { tool, "--hidedashboard", nullptr };
+    extern char **environ;
+    pid_t pid;
+    if (posix_spawn(&pid, tool, nullptr, nullptr, argv, environ) != 0) {
+        LOG_WARNING("the SteamVR menu could not be asked to close");
+    }
+}
+
 static RESULT M_CreateInstance(void)
 {
     M_PRIV *const p = &m_Priv;
-    const char *const extensions[] = { XR_KHR_OPENGL_ENABLE_EXTENSION_NAME };
+    // The controllers of the Steam Frame are a kind of their own, which only
+    // a runtime that knows them takes bindings for.
+    const char *extensions[4] = { XR_KHR_OPENGL_ENABLE_EXTENSION_NAME };
+    uint32_t extension_count = 1;
+    // Lets the headset say when the player takes it off.
+    p->has_presence = M_HasExtension(XR_EXT_USER_PRESENCE_EXTENSION_NAME);
+    if (p->has_presence) {
+        extensions[extension_count++] = XR_EXT_USER_PRESENCE_EXTENSION_NAME;
+    }
+    p->has_refresh_rates =
+        M_HasExtension(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
+    if (p->has_refresh_rates) {
+        extensions[extension_count++] =
+            XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME;
+    }
+    if (M_HasExtension("XR_VALVE_frame_controller_interaction")) {
+        extensions[extension_count++] = "XR_VALVE_frame_controller_interaction";
+    }
     const XrInstanceCreateInfo info = {
         .type = XR_TYPE_INSTANCE_CREATE_INFO,
         .applicationInfo = {
@@ -71,7 +166,7 @@ static RESULT M_CreateInstance(void)
             .engineName = "TRX",
             .apiVersion = XR_MAKE_VERSION(1, 0, 0),
         },
-        .enabledExtensionCount = 1,
+        .enabledExtensionCount = extension_count,
         .enabledExtensionNames = extensions,
     };
     M_MUST(
@@ -80,6 +175,7 @@ static RESULT M_CreateInstance(void)
 
     XrInstanceProperties props = { .type = XR_TYPE_INSTANCE_PROPERTIES };
     if (XR_SUCCEEDED(xrGetInstanceProperties(p->instance, &props))) {
+        p->is_steamvr = strncmp(props.runtimeName, "SteamVR", 7) == 0;
         LOG_INFO(
             "OpenXR runtime: %s %d.%d.%d", props.runtimeName,
             XR_VERSION_MAJOR(props.runtimeVersion),
@@ -164,15 +260,104 @@ static RESULT M_CreateSession(SDL_Window *const window)
     }
     M_MUST(result, "the headset does not take the game's OpenGL context");
 
-    const XrReferenceSpaceCreateInfo space_info = {
+    XrReferenceSpaceCreateInfo space_info = {
         .type = XR_TYPE_REFERENCE_SPACE_CREATE_INFO,
         .referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL,
         .poseInReferenceSpace = { .orientation = { .w = 1.0f } },
     };
     M_MUST(
+        xrCreateReferenceSpace(p->session, &space_info, &p->local_space),
+        "the headset has no space to place the screen in");
+    M_MUST(
         xrCreateReferenceSpace(p->session, &space_info, &p->space),
         "the headset has no space to place the screen in");
+    space_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+    M_MUST(
+        xrCreateReferenceSpace(p->session, &space_info, &p->view_space),
+        "the headset does not say where the player looks");
+    p->needs_recenter = true;
     return OK;
+}
+
+// Hangs the screen in front of where the player looks at the given time. It
+// stays upright: only the way the player faces is taken, not how the head
+// tilts. Returns false where the headset does not know where the head is.
+static bool M_Recenter(const XrTime time)
+{
+    M_PRIV *const p = &m_Priv;
+    XrSpaceLocation location = { .type = XR_TYPE_SPACE_LOCATION };
+    const XrSpaceLocationFlags needed = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT
+        | XR_SPACE_LOCATION_POSITION_VALID_BIT;
+    if (XR_FAILED(xrLocateSpace(p->view_space, p->local_space, time, &location))
+        || (location.locationFlags & needed) != needed) {
+        return false;
+    }
+
+    const XrQuaternionf q = location.pose.orientation;
+    const float yaw = atan2f(
+        2.0f * (q.w * q.y + q.x * q.z), 1.0f - 2.0f * (q.x * q.x + q.y * q.y));
+    const XrReferenceSpaceCreateInfo info = {
+        .type = XR_TYPE_REFERENCE_SPACE_CREATE_INFO,
+        .referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL,
+        .poseInReferenceSpace = {
+            .orientation = { .y = sinf(yaw / 2.0f), .w = cosf(yaw / 2.0f) },
+            .position = location.pose.position,
+        },
+    };
+    XrSpace space;
+    if (XR_FAILED(xrCreateReferenceSpace(p->session, &info, &space))) {
+        return false;
+    }
+    xrDestroySpace(p->space);
+    p->space = space;
+    return true;
+}
+
+// Asks the headset to show as many frames a second as a whole number of them
+// fits into a tick of the game. What only moves once a tick, such as the
+// pose of an animation, is then held for the same number of frames every
+// time; at any other rate the number alternates, which shows as a stutter.
+static void M_PickRefreshRate(void)
+{
+    M_PRIV *const p = &m_Priv;
+    if (!p->has_refresh_rates) {
+        return;
+    }
+    XrResult (*enumerate)(XrSession, uint32_t, uint32_t *, float *) = nullptr;
+    XrResult (*request)(XrSession, float) = nullptr;
+    if (XR_FAILED(xrGetInstanceProcAddr(
+            p->instance, "xrEnumerateDisplayRefreshRatesFB",
+            (PFN_xrVoidFunction *)&enumerate))
+        || XR_FAILED(xrGetInstanceProcAddr(
+            p->instance, "xrRequestDisplayRefreshRateFB",
+            (PFN_xrVoidFunction *)&request))) {
+        return;
+    }
+
+    float rates[16];
+    uint32_t count = 0;
+    if (XR_FAILED(enumerate(p->session, 16, &count, rates))) {
+        return;
+    }
+    // The lowest such rate that is still smooth to look at.
+    const float wanted = 3.0f * LOGIC_FPS;
+    float best = 0.0f;
+    for (uint32_t i = 0; i < count; i++) {
+        const float ticks = rates[i] / LOGIC_FPS;
+        const bool is_whole = fabsf(ticks - roundf(ticks)) < 0.02f;
+        if (is_whole && rates[i] >= wanted - 0.5f
+            && (best == 0.0f || rates[i] < best)) {
+            best = rates[i];
+        }
+    }
+    if (best == 0.0f) {
+        LOG_INFO("the headset has no refresh rate that fits the game");
+        return;
+    }
+    const XrResult result = request(p->session, best);
+    LOG_INFO(
+        "asked the headset for %.0f Hz: %s", best,
+        XR_SUCCEEDED(result) ? "taken" : M_DescribeResult(result));
 }
 
 static RESULT M_CreateScreen(void)
@@ -221,6 +406,7 @@ static RESULT M_CreateScreen(void)
         "the headset gives no pictures to draw into");
 
     glGenFramebuffers(1, &p->fbo);
+    M_PickRefreshRate();
     return OK;
 }
 
@@ -228,6 +414,17 @@ static void M_HandleStateChange(const XrSessionState state)
 {
     M_PRIV *const p = &m_Priv;
     LOG_INFO("OpenXR session state: %d", state);
+    if (state == XR_SESSION_STATE_VISIBLE && p->is_steamvr
+        && !p->is_menu_dismissed) {
+        p->is_menu_dismissed = true;
+        M_DismissSteamVRMenu();
+    }
+    if (state == XR_SESSION_STATE_FOCUSED) {
+        // The player comes back to the game, from the menu of the headset
+        // or from starting it, and may have turned since the screen was
+        // placed.
+        p->needs_recenter = true;
+    }
     if (state == XR_SESSION_STATE_READY) {
         const XrSessionBeginInfo info = {
             .type = XR_TYPE_SESSION_BEGIN_INFO,
@@ -245,10 +442,16 @@ static void M_HandleStateChange(const XrSessionState state)
     } else if (state == XR_SESSION_STATE_STOPPING) {
         xrEndSession(p->session);
         p->is_running = false;
-    } else if (
-        state == XR_SESSION_STATE_EXITING
-        || state == XR_SESSION_STATE_LOSS_PENDING) {
+    } else if (state == XR_SESSION_STATE_EXITING) {
+        // The player closed the game from the headset.
         p->is_running = false;
+        p->is_over = true;
+        SDL_Event quit = { .type = SDL_QUIT };
+        SDL_PushEvent(&quit);
+    } else if (state == XR_SESSION_STATE_LOSS_PENDING) {
+        LOG_WARNING("the headset is gone, and the game stays in its window");
+        p->is_running = false;
+        p->is_over = true;
     }
 }
 
@@ -261,6 +464,25 @@ static void M_PollEvents(void)
             const XrEventDataSessionStateChanged *const changed =
                 (const XrEventDataSessionStateChanged *)&event;
             M_HandleStateChange(changed->state);
+        } else if (event.type == XR_TYPE_EVENT_DATA_USER_PRESENCE_CHANGED_EXT) {
+            const XrEventDataUserPresenceChangedEXT *const changed =
+                (const XrEventDataUserPresenceChangedEXT *)&event;
+            p->is_player_away = !changed->isUserPresent;
+            LOG_INFO(
+                "the player %s the headset",
+                p->is_player_away ? "took off" : "put on");
+        } else if (
+            event.type == XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING) {
+            // The player recentered through the headset, which moves the
+            // space the screen hangs in. The screen follows to where the
+            // player looks now.
+            p->needs_recenter = true;
+        } else if (event.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING) {
+            LOG_WARNING(
+                "the OpenXR runtime is gone, and the game stays in its "
+                "window");
+            p->is_running = false;
+            p->is_over = true;
         }
         event = (XrEventDataBuffer) { .type = XR_TYPE_EVENT_DATA_BUFFER };
     }
@@ -270,6 +492,10 @@ void VR_Session_PrepareSDL(void)
 {
     // The runtime shares the game's OpenGL context through X11.
     SDL_SetHint(SDL_HINT_VIDEODRIVER, "x11");
+    // The game window may be hidden, and never has the keyboard then. SDL
+    // drops what gamepads say while no window has it, the controllers of the
+    // headset among them.
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 }
 
 RESULT VR_Session_Start(void *const window)
@@ -288,6 +514,11 @@ RESULT VR_Session_Start(void *const window)
         VR_Session_Stop();
         return result;
     }
+    // Without its controllers the headset still shows the game, which other
+    // devices can play.
+    SHOULD(
+        VR_Gamepad_Init(m_Priv.instance, m_Priv.session),
+        "the controllers of the headset will not work");
     // The headset says when a frame is due, so the window waits for nothing.
     SDL_GL_SetSwapInterval(0);
     return OK;
@@ -296,6 +527,7 @@ RESULT VR_Session_Start(void *const window)
 void VR_Session_Stop(void)
 {
     M_PRIV *const p = &m_Priv;
+    VR_Gamepad_Shutdown();
     if (p->fbo != 0) {
         glDeleteFramebuffers(1, &p->fbo);
     }
@@ -304,6 +536,12 @@ void VR_Session_Stop(void)
     }
     if (p->space != XR_NULL_HANDLE) {
         xrDestroySpace(p->space);
+    }
+    if (p->view_space != XR_NULL_HANDLE) {
+        xrDestroySpace(p->view_space);
+    }
+    if (p->local_space != XR_NULL_HANDLE) {
+        xrDestroySpace(p->local_space);
     }
     if (p->session != XR_NULL_HANDLE) {
         xrDestroySession(p->session);
@@ -314,9 +552,31 @@ void VR_Session_Stop(void)
     *p = (M_PRIV) {};
 }
 
+void VR_Session_GetScreenSize(
+    int32_t *const out_width, int32_t *const out_height)
+{
+    *out_width = M_SCREEN_WIDTH;
+    *out_height = M_SCREEN_HEIGHT;
+}
+
 bool VR_Session_IsActive(void)
 {
     return m_Priv.session != XR_NULL_HANDLE;
+}
+
+bool VR_Session_PacesFrames(void)
+{
+    return m_Priv.is_running;
+}
+
+bool VR_Session_IsPlayerAway(void)
+{
+    return VR_Session_IsActive() && m_Priv.is_player_away;
+}
+
+void VR_Session_Recenter(void)
+{
+    m_Priv.needs_recenter = true;
 }
 
 bool VR_Session_BeginFrame(VR_SCREEN *const out_screen)
@@ -327,19 +587,37 @@ bool VR_Session_BeginFrame(VR_SCREEN *const out_screen)
         return false;
     }
     M_PollEvents();
+    if (p->is_over) {
+        VR_Session_Stop();
+        return false;
+    }
     if (!p->is_running) {
         return false;
     }
 
     XrFrameState frame_state = { .type = XR_TYPE_FRAME_STATE };
-    if (XR_FAILED(xrWaitFrame(p->session, nullptr, &frame_state))
-        || XR_FAILED(xrBeginFrame(p->session, nullptr))) {
+    XrResult result = xrWaitFrame(p->session, nullptr, &frame_state);
+    if (XR_SUCCEEDED(result)) {
+        result = xrBeginFrame(p->session, nullptr);
+    }
+    if (XR_FAILED(result)) {
+        // A session that is lost says so here before any event does.
+        if (result == XR_ERROR_SESSION_LOST
+            || result == XR_ERROR_INSTANCE_LOST) {
+            LOG_WARNING(
+                "the headset is gone, and the game stays in its window");
+            VR_Session_Stop();
+        }
         return false;
     }
     p->display_time = frame_state.predictedDisplayTime;
     p->has_image = false;
+    VR_Gamepad_Update(p->session);
     if (!frame_state.shouldRender) {
         return true;
+    }
+    if (p->needs_recenter && M_Recenter(p->display_time)) {
+        p->needs_recenter = false;
     }
 
     uint32_t index = 0;

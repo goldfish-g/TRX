@@ -13,6 +13,8 @@
     #include <windows.h>
 #endif
 
+#include <trx/vr/session.h>
+
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_messagebox.h>
 #include <libavcodec/version.h>
@@ -153,6 +155,15 @@ SHELL_SIZE Shell_GetWindowSize(void)
     if (window == nullptr) {
         return (SHELL_SIZE) { .w = -1, .h = -1 };
     }
+    // A window that stays hidden while a headset shows the game has no size
+    // that matters, and the game is drawn at the size of the headset's
+    // screen.
+    if (VR_Session_IsActive()
+        && (SDL_GetWindowFlags(window) & SDL_WINDOW_HIDDEN) != 0) {
+        SHELL_SIZE size;
+        VR_Session_GetScreenSize(&size.w, &size.h);
+        return size;
+    }
     return Shell_Host_GetWindowSize(window);
 }
 
@@ -182,6 +193,12 @@ bool Shell_ShouldPauseForFocusLoss(void)
     // would fire them into a game that is not running.
     if (TestReplay_IsOpened()) {
         return false;
+    }
+    // A player who took the VR headset off sees and hears nothing of the
+    // game, so it waits even where the setting leaves an unfocused window
+    // running.
+    if (VR_Session_IsPlayerAway()) {
+        return true;
     }
     return g_Config.gameplay.pause_on_focus_lost && !Shell_IsFocused();
 }

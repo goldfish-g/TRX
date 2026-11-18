@@ -47,6 +47,9 @@ static void M_ShowHelp(void)
     puts(
         "   --headless-fps <NUM>: control replay frame rate in headless mode.");
     puts("   --vr: show the game in a VR headset.");
+    puts(
+        "   --vr-no-mirror: keep the game window hidden while a headset "
+        "shows the game.");
     puts("-q/--quiet: silence logs and only show errors.");
     puts("   --check-lua-api: load and seal the Lua API, then exit.");
     puts(
@@ -267,6 +270,9 @@ RESULT Shell_ParseArgs(VECTOR *const args, SHELL_ARGS **const out_args)
         }
         if (!strcmp(arg, "--vr")) {
             result->vr = true;
+        }
+        if (!strcmp(arg, "--vr-no-mirror")) {
+            result->vr_no_mirror = true;
         }
         if (!strcmp(arg, "--headless-fps") && next_arg != nullptr) {
             int32_t fps = 0;

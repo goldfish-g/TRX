@@ -1038,7 +1038,10 @@ if get_option('vr')
     dependency('openxr', static: staticdeps),
     c_compiler.find_library('xcb', static: false),
   ]
-  common_sources += ['trx/vr/session_openxr.c']
+  common_sources += [
+    'trx/vr/gamepad_openxr.c',
+    'trx/vr/session_openxr.c',
+  ]
 else
   common_sources += ['trx/vr/session_none.c']
 endif

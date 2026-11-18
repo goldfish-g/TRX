@@ -77,6 +77,7 @@ int main(int argc, char *argv[])
                     .headless = Shell_GetPrevHeadless(),
                     .quiet = Shell_GetPrevQuiet(),
                     .vr = Shell_GetPrevVR(),
+                    .vr_no_mirror = Shell_GetPrevVRNoMirror(),
                 };
                 args = next_args;
                 GamePath_Init(args);

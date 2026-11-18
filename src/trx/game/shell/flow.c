@@ -40,6 +40,7 @@ static char *m_PendingMod = nullptr;
 static bool m_PrevHeadless = false;
 static bool m_PrevQuiet = false;
 static bool m_PrevVR = false;
+static bool m_PrevVRNoMirror = false;
 
 // Set while a replay runs a stretch with the drawing off.
 static bool m_DrawingSkipped = false;
@@ -339,6 +340,11 @@ bool Shell_GetPrevVR(void)
     return m_PrevVR;
 }
 
+bool Shell_GetPrevVRNoMirror(void)
+{
+    return m_PrevVRNoMirror;
+}
+
 const SHELL_ARGS *Shell_GetArgs(void)
 {
     return m_Session != nullptr ? m_Session->args : nullptr;
@@ -397,7 +403,11 @@ int32_t Shell_Main(const SHELL_ARGS *const args)
             "the game will not be shown in a headset");
     }
     EXIT_ON_FAIL(Output_Init(), "TRX cannot draw the game");
-    if (s->args->headless) {
+    // A headset that runs the game itself shows every window it finds as a
+    // screen of its own, next to the one the game draws.
+    const bool is_window_hidden =
+        s->args->headless || (s->args->vr_no_mirror && VR_Session_IsActive());
+    if (is_window_hidden) {
         Shell_RefreshRendererViewport();
     } else {
         M_ShowWindow();
@@ -451,6 +461,7 @@ int32_t Shell_Main(const SHELL_ARGS *const args)
         m_PrevHeadless = s->args->headless;
         m_PrevQuiet = s->args->quiet;
         m_PrevVR = s->args->vr;
+        m_PrevVRNoMirror = s->args->vr_no_mirror;
         M_ShutdownModules();
         ShellSession_Free(m_Session);
         m_Session = nullptr;
