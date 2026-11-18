@@ -25,6 +25,12 @@ void Clock_EnableFixedFPS(int32_t fps);
 void Clock_SyncTick(void);
 int32_t Clock_WaitTick(void);
 
+// Counts the logic ticks that came due since the last call, without waiting
+// for one. For a caller whose frames are paced by something else, such as a
+// VR headset, and who draws as often as that allows. The fraction is how far
+// the time has moved from the last tick towards the next one.
+int32_t Clock_TakeTicks(double *out_fraction);
+
 size_t Clock_GetDateTime(char *buffer, size_t size);
 
 int32_t Clock_GetFrameAdvance(void);

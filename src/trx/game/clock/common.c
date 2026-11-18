@@ -223,6 +223,35 @@ int32_t Clock_WaitTick(void)
     return frames;
 }
 
+int32_t Clock_TakeTicks(double *const out_fraction)
+{
+    // More ticks than this in one go means the game stood still, for a load
+    // or in a debugger, and the time it missed is let go.
+    const int32_t max_ticks = 4;
+
+    const Uint64 current_counter = SDL_GetPerformanceCounter();
+    if (m_LastCounter == 0) {
+        m_LastCounter = current_counter;
+        *out_fraction = 1.0;
+        return 1;
+    }
+
+    const double tick_ticks =
+        m_Frequency / (LOGIC_FPS * Clock_GetSpeedMultiplier());
+    m_Accumulator += (double)(current_counter - m_LastCounter);
+    m_LastCounter = current_counter;
+
+    int32_t ticks = (int32_t)(m_Accumulator / tick_ticks);
+    if (ticks > max_ticks) {
+        ticks = max_ticks;
+        m_Accumulator = 0.0;
+    } else {
+        m_Accumulator -= ticks * tick_ticks;
+    }
+    *out_fraction = m_Accumulator / tick_ticks;
+    return ticks;
+}
+
 double Clock_GetRealTime(void)
 {
     return M_GetHighPrecisionCounter();

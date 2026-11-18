@@ -31,6 +31,7 @@
 #include <trx/gl/gpu_timer.h>
 #include <trx/gl/renderer.h>
 #include <trx/gl/track.h>
+#include <trx/vr/session.h>
 
 #include <SDL2/SDL_timer.h>
 
@@ -106,6 +107,15 @@ static void M_SetHalfFrameRate(void)
 {
     Interpolation_SetRate(m_Exiting ? 1.0 : 0.5);
     Interpolation_SetUIRate(0.5);
+}
+
+// Reports whether a VR headset says when each frame is due. The game then
+// draws as often as the headset asks, each frame as far between two ticks as
+// the time has come, rather than at the two fixed points of a tick.
+static bool M_IsHeadsetPaced(void)
+{
+    return VR_Session_PacesFrames() && M_HasHalfFrames()
+        && !Shell_ShouldPauseForFocusLoss();
 }
 
 static void M_DrawHeldScreen(void)
@@ -420,9 +430,12 @@ GF_COMMAND PhaseExecutor_Run(PHASE *const phase)
     }
 
     while (true) {
-        int32_t nframes = Clock_WaitTick();
+        const bool is_headset_paced = M_IsHeadsetPaced();
+        double rate = 1.0;
+        const int32_t nframes =
+            is_headset_paced ? Clock_TakeTicks(&rate) : Clock_WaitTick();
         int32_t frame = 0;
-        while (true) {
+        while (frame < nframes) {
             const PHASE_CONTROL control = M_Control(phase);
             if (control.action == PHASE_ACTION_END
                 || control.action == PHASE_ACTION_END_FAST) {
@@ -441,9 +454,16 @@ GF_COMMAND PhaseExecutor_Run(PHASE *const phase)
             }
 
             frame++;
-            if (frame >= nframes) {
-                break;
-            }
+        }
+
+        if (is_headset_paced) {
+            Interpolation_SetRate(m_Exiting ? 1.0 : rate);
+            Interpolation_SetUIRate(rate);
+            Output_SetTime(m_CurrentFrame - 1.0f + (float)rate);
+            Output_SetControlFrame(nframes > 0);
+            M_Draw(phase);
+            Output_SetControlFrame(false);
+            continue;
         }
 
         if (!Shell_ShouldPauseForFocusLoss() && M_HasHalfFrames()) {
