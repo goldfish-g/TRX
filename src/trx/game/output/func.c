@@ -8,9 +8,11 @@
 #include <trx/game/camera/common.h>
 #include <trx/game/matrix.h>
 #include <trx/game/output/const.h>
+#include <trx/game/output/scene_compositor.h>
 #include <trx/game/output/state.h>
 #include <trx/game/output/vars.h>
 #include <trx/gl/context.h>
+#include <trx/vr/session.h>
 
 #include <math.h>
 
@@ -150,6 +152,34 @@ void Output_ApplyFOV(void)
     }
 
     g_PhdPersp = Output_GetPerspective(fov_width, fov);
+
+    // The eyes of a VR headset see further to every side than a screen
+    // shows, and each from a place of its own. What is found visible has to
+    // cover both, so the view it is found with is opened until it does, with
+    // some to spare for what the eyes see past the head.
+    // On the screen of a VR headset each eye's picture is moved sideways,
+    // which brings a strip into it from past the edge of what the camera
+    // sees. What is found visible is found a little wider for it.
+    if (VR_Session_GetDrawnEye() >= 0) {
+        g_PhdPersp =
+            MAX((int32_t)(g_PhdPersp * (1.0f - 4.0f * VR_SCREEN_PARALLAX)), 1);
+    }
+
+    const VR_VIEW *const head =
+        SceneCompositor_IsStereo() ? VR_Session_GetView() : nullptr;
+    if (head != nullptr) {
+        const float margin = 1.25f;
+        float tan_x = 0.0f;
+        float tan_y = 0.0f;
+        for (int32_t i = 0; i < 2; i++) {
+            const VR_EYE *const eye = &head->eyes[i];
+            tan_x = MAX(tan_x, MAX(-eye->tan_left, eye->tan_right));
+            tan_y = MAX(tan_y, MAX(-eye->tan_down, eye->tan_up));
+        }
+        const float persp_x = sw / (2.0f * tan_x * margin);
+        const float persp_y = sh / (2.0f * tan_y * margin);
+        g_PhdPersp = MAX((int32_t)MIN(persp_x, persp_y), 1);
+    }
 }
 
 int32_t Output_GetPerspective(const int32_t width, const int32_t fov)

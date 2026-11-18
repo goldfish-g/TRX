@@ -951,6 +951,11 @@ void Output_SetInventoryLightingMode(const bool enabled)
     m_InventoryMode = enabled;
 }
 
+bool Output_IsInventoryLightingMode(void)
+{
+    return m_InventoryMode;
+}
+
 const LIGHTING_MODEL g_LightingModelTR4 = {
     .init = M_Init,
     .shutdown = M_Shutdown,

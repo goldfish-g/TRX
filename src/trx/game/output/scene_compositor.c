@@ -1,10 +1,12 @@
 #include <trx/game/output/scene_compositor.h>
 
 #include <trx/config.h>
+#include <trx/core/utils.h>
 #include <trx/core/vector.h>
 #include <trx/debug.h>
 #include <trx/game/output.h>
 #include <trx/game/output/lights/priv.h>
+#include <trx/game/output/overlay.h>
 #include <trx/game/output/shaders/mesh.h>
 #include <trx/game/output/shaders/ui.h>
 #include <trx/game/output/textures.h>
@@ -16,6 +18,9 @@
 #include <trx/gl/gpu_timer.h>
 #include <trx/gl/renderer.h>
 #include <trx/gl/utils.h>
+#include <trx/vr/session.h>
+
+#include <math.h>
 
 #define M_PROCESS_SOURCES(p, func, ...)                                        \
     do {                                                                       \
@@ -32,6 +37,32 @@ typedef struct {
     VECTOR *sources;
     GLuint sampler_id;
     int32_t capture_depth;
+    // Whether the world is drawn for the two eyes of a VR headset, and the
+    // framebuffers it is drawn into while it is.
+    bool is_stereo;
+    bool is_distant;
+    int32_t eye;
+    VR_SCREEN eye_target;
+    // How far the world loses its colors once it is drawn, as it does behind
+    // a menu, and what it is tinted with.
+    float tint_amount;
+    RGB_F tint;
+    // How far the world fades to black once it is drawn, where a screen
+    // would have a black sheet laid over it.
+    float fade;
+    // Whether the eye's picture is held, between the world being drawn into
+    // it and the end of the frame, for what the frame still does to it.
+    bool has_eye;
+    struct {
+        GLuint program;
+        GLuint texture;
+        GLuint vao;
+        GLint loc_amount;
+        GLint loc_tint;
+        GLint loc_fade;
+        int32_t width;
+        int32_t height;
+    } tinter;
 } M_PRIV;
 
 static M_PRIV m_Priv = {};
@@ -130,17 +161,10 @@ static void M_PrepareScene(const M_PRIV *const p)
     Output_SetCurrentRoom(nullptr);
 }
 
-static void M_RenderScenePasses(const M_PRIV *const p)
+// Draws the passes that make up the world, from the background to what is
+// blended over it, with the view that is uploaded.
+static void M_RenderWorldPasses(const M_PRIV *const p)
 {
-    if (!M_IsAnySourceDirty(p)) {
-        return;
-    }
-
-    Output_ApplyPendingClear();
-    TRX_GL_Renderer_InvalidateScene();
-    SceneCompositor_BindTextures();
-    M_SetupScene(p);
-
     glDisable(GL_DEPTH_TEST);
     if (M_IsSourceDirty(p, SCENE_PASS_BACKGROUND)) {
         M_RenderSourcePass(p, SCENE_PASS_BACKGROUND);
@@ -175,14 +199,87 @@ static void M_RenderScenePasses(const M_PRIV *const p)
         glDepthMask(GL_TRUE);
         glDisable(GL_CULL_FACE);
     }
+}
+
+// Draws the world for the eye the frame is drawn for, as that eye sees it
+// from the player's head.
+static void M_RenderWorldToEye(const M_PRIV *const p)
+{
+    const VR_VIEW *const head = VR_Session_GetView();
+    ASSERT(head != nullptr);
+    SceneCompositor_BindTextures();
+    glBindFramebuffer(GL_FRAMEBUFFER, p->eye_target.fbo);
+    glViewport(0, 0, p->eye_target.width, p->eye_target.height);
+    M_SetupScene(p);
+    VR_EYE view = head->eyes[p->eye];
+    if (p->is_distant) {
+        view.offset[0] = 0.0f;
+        view.offset[1] = 0.0f;
+        view.offset[2] = 0.0f;
+    }
+    Output_Uniforms_UploadEyeMatrix(Output_GetUniforms(), &g_ViewMatrix, &view);
+    M_RenderWorldPasses(p);
+    // Each flush stands in front of the last, as on a screen.
+    glClear(GL_DEPTH_BUFFER_BIT);
+    TRX_GL_Renderer_BindGeometryFbo();
+    TRX_GL_Context_SwitchToViewport(VIEWPORT_GAME);
+}
+
+// Draws the flat pictures: the backgrounds of the menus, and what is laid
+// over the world. On the screen of a VR headset they have no depth of their
+// own, and are put as far back as anything gets, so that every model drawn
+// over them is in front of them.
+static void M_RenderOverlayPass(const M_PRIV *const p)
+{
+    const int32_t eye = VR_Session_GetDrawnEye();
+    if (eye < 0 || Output_Overlay_IsWorldAround()) {
+        M_RenderSourcePass(p, SCENE_PASS_OVERLAY);
+        return;
+    }
+    GLint viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    const float shift =
+        (eye == 0 ? -1.0f : 1.0f) * VR_SCREEN_PARALLAX * viewport[2] / 2.0f;
+    glViewport(
+        viewport[0] + (GLint)lroundf(shift), viewport[1], viewport[2],
+        viewport[3]);
+    M_RenderSourcePass(p, SCENE_PASS_OVERLAY);
+    glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+}
+
+static void M_RenderScenePasses(const M_PRIV *const p)
+{
+    if (!M_IsAnySourceDirty(p)) {
+        return;
+    }
+
+    if (p->is_stereo) {
+        M_RenderWorldToEye(p);
+        // What is left is drawn flat over the scene, which has no place
+        // between the eyes yet.
+        return;
+    }
+
+    Output_ApplyPendingClear();
+    TRX_GL_Renderer_InvalidateScene();
+    SceneCompositor_BindTextures();
+    M_SetupScene(p);
+    M_RenderWorldPasses(p);
 
     if (M_IsSourceDirty(p, SCENE_PASS_OVERLAY)) {
-        M_RenderSourcePass(p, SCENE_PASS_OVERLAY);
+        M_RenderOverlayPass(p);
     }
 
     if (M_IsSourceDirty(p, SCENE_PASS_UI)) {
         M_SetupUI(p);
+        // On the panel around a player in VR the text comes forward, by
+        // being moved towards the other eye's side.
+        const int32_t shift = SceneCompositor_GetPanelTextShift();
+        GLint viewport[4];
+        glGetIntegerv(GL_VIEWPORT, viewport);
+        glViewport(viewport[0] + shift, viewport[1], viewport[2], viewport[3]);
         M_RenderSourcePass(p, SCENE_PASS_UI);
+        glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
     }
 }
 
@@ -191,6 +288,217 @@ static bool M_IsActive(void)
     return !Output_IsHeadless() || m_Priv.capture_depth > 0
         || Shell_GetArgs()->debug_render_performance
         || TRX_GL_Context_GetScheduledScreenshotPath() != nullptr;
+}
+
+// Takes the colors out of the picture in the given framebuffer where it
+// stands, and tints what is left. The picture is copied aside first, since
+// it cannot be read while it is drawn into.
+static void M_Tint(
+    M_PRIV *const p, const GLuint fbo, const int32_t width,
+    const int32_t height)
+{
+    if (p->tinter.program == 0) {
+        const char *const vertex = TRX_GL_SHADER_PRELUDE
+            "out vec2 vertUV;\n"
+            "void main() {\n"
+            "    vec2 pos = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);\n"
+            "    vertUV = pos;\n"
+            "    gl_Position = vec4(pos * 2.0 - 1.0, 0.0, 1.0);\n"
+            "}\n";
+        const char *const fragment = TRX_GL_SHADER_PRELUDE
+            "uniform sampler2D uTexture;\n"
+            "uniform float uAmount;\n"
+            "uniform vec3 uTint;\n"
+            "uniform float uFade;\n"
+            "in vec2 vertUV;\n"
+            "out vec4 outColor;\n"
+            "void main() {\n"
+            "    vec3 color = texture(uTexture, vertUV).rgb;\n"
+            "    float gray = dot(color, vec3(0.299, 0.587, 0.114));\n"
+            "    outColor = vec4(mix(color, vec3(gray), uAmount) * uTint "
+            "* (1.0 - uFade), 1.0);\n"
+            "}\n";
+        const GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+        glShaderSource(vs, 1, &vertex, nullptr);
+        glCompileShader(vs);
+        const GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+        glShaderSource(fs, 1, &fragment, nullptr);
+        glCompileShader(fs);
+        p->tinter.program = glCreateProgram();
+        glAttachShader(p->tinter.program, vs);
+        glAttachShader(p->tinter.program, fs);
+        glLinkProgram(p->tinter.program);
+        glDeleteShader(vs);
+        glDeleteShader(fs);
+        p->tinter.loc_amount =
+            glGetUniformLocation(p->tinter.program, "uAmount");
+        p->tinter.loc_tint = glGetUniformLocation(p->tinter.program, "uTint");
+        p->tinter.loc_fade = glGetUniformLocation(p->tinter.program, "uFade");
+        glGenVertexArrays(1, &p->tinter.vao);
+        glGenTextures(1, &p->tinter.texture);
+    }
+
+    // The rest of the renderer keeps track of what it has bound, and must
+    // find all of it as it left it.
+    GLint old_program = 0;
+    GLint old_vao = 0;
+    GLint old_texture = 0;
+    GLint old_sampler = 0;
+    GLint old_active = 0;
+    GLint old_polygon_mode[2] = { GL_FILL, GL_FILL };
+    glGetIntegerv(GL_CURRENT_PROGRAM, &old_program);
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &old_vao);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &old_active);
+    glGetIntegerv(GL_POLYGON_MODE, old_polygon_mode);
+    const GLboolean had_depth_test = glIsEnabled(GL_DEPTH_TEST);
+    const GLboolean had_blend = glIsEnabled(GL_BLEND);
+    const GLboolean had_cull_face = glIsEnabled(GL_CULL_FACE);
+    const GLboolean had_scissor = glIsEnabled(GL_SCISSOR_TEST);
+
+    glActiveTexture(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_texture);
+    glGetIntegerv(GL_SAMPLER_BINDING, &old_sampler);
+    glBindSampler(0, 0);
+    glBindTexture(GL_TEXTURE_2D, p->tinter.texture);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    if (p->tinter.width != width || p->tinter.height != height) {
+        glTexImage2D(
+            GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA,
+            GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        p->tinter.width = width;
+        p->tinter.height = height;
+    }
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
+
+    glViewport(0, 0, width, height);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_SCISSOR_TEST);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    glUseProgram(p->tinter.program);
+    glUniform1f(p->tinter.loc_amount, p->tint_amount);
+    if (p->tint_amount > 0.0f) {
+        glUniform3f(p->tinter.loc_tint, p->tint.r, p->tint.g, p->tint.b);
+    } else {
+        glUniform3f(p->tinter.loc_tint, 1.0f, 1.0f, 1.0f);
+    }
+    glUniform1f(p->tinter.loc_fade, p->fade);
+    glBindVertexArray(p->tinter.vao);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    glBindVertexArray((GLuint)old_vao);
+    glUseProgram((GLuint)old_program);
+    glBindTexture(GL_TEXTURE_2D, (GLuint)old_texture);
+    glBindSampler(0, (GLuint)old_sampler);
+    glActiveTexture((GLenum)old_active);
+    glPolygonMode(GL_FRONT_AND_BACK, (GLenum)old_polygon_mode[0]);
+    if (had_depth_test) {
+        glEnable(GL_DEPTH_TEST);
+    }
+    if (had_blend) {
+        glEnable(GL_BLEND);
+    }
+    if (had_cull_face) {
+        glEnable(GL_CULL_FACE);
+    }
+    if (had_scissor) {
+        glEnable(GL_SCISSOR_TEST);
+    }
+    TRX_GL_Renderer_BindGeometryFbo();
+    TRX_GL_Context_SwitchToViewport(VIEWPORT_GAME);
+}
+
+void SceneCompositor_SetWorldTint(const float amount, const RGB_F tint)
+{
+    m_Priv.tint_amount = amount;
+    m_Priv.tint = tint;
+}
+
+void SceneCompositor_AddWorldFade(const float opacity)
+{
+    M_PRIV *const p = &m_Priv;
+    p->fade = MIN(MAX(p->fade, opacity), 1.0f);
+}
+
+void SceneCompositor_TintScene(void)
+{
+    M_PRIV *const p = &m_Priv;
+    if (p->has_eye || p->tint_amount <= 0.0f) {
+        return;
+    }
+    const VIEWPORT_RECT game = Viewport_GetRect(VIEWPORT_GAME);
+    M_Tint(p, TRX_GL_Renderer_GetGeometryFboId(), game.width, game.height);
+    TRX_GL_Renderer_InvalidateScene();
+    p->tint_amount = 0.0f;
+}
+
+int32_t SceneCompositor_GetPanelTextShift(void)
+{
+    const int32_t eye = VR_Session_GetDrawnEye();
+    if (eye < 0 || !Output_Overlay_IsWorldBehind()) {
+        return 0;
+    }
+    const float half_width = Viewport_GetWidth(VIEWPORT_UI) / 2.0f;
+    return (int32_t)lroundf(
+        (eye == 0 ? 1.0f : -1.0f) * VR_PANEL_TEXT_PARALLAX * half_width);
+}
+
+bool SceneCompositor_IsStereo(void)
+{
+    return m_Priv.is_stereo;
+}
+
+void SceneCompositor_BeginWorld(void)
+{
+    M_PRIV *const p = &m_Priv;
+    const int32_t eye = VR_Session_GetDrawnEye();
+    // A capture is a picture of the game as a screen shows it.
+    if (p->is_stereo || p->has_eye || !M_IsActive() || p->capture_depth > 0
+        || eye < 0 || VR_Session_GetMode() != VR_MODE_INVOLVED
+        || VR_Session_GetView() == nullptr
+        || !VR_Session_AcquireEye(eye, &p->eye_target)) {
+        return;
+    }
+    const RGBA_F background = Output_GetBackgroundColor();
+    glBindFramebuffer(GL_FRAMEBUFFER, p->eye_target.fbo);
+    glViewport(0, 0, p->eye_target.width, p->eye_target.height);
+    glClearBufferfv(GL_COLOR, 0, &background.r);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    TRX_GL_Renderer_BindGeometryFbo();
+    TRX_GL_Context_SwitchToViewport(VIEWPORT_GAME);
+    p->eye = eye;
+    p->is_stereo = true;
+}
+
+void SceneCompositor_EndWorld(void)
+{
+    M_PRIV *const p = &m_Priv;
+    if (!p->is_stereo) {
+        return;
+    }
+    // The picture stays in hand: the rest of the frame may still ask for it
+    // to lose its colors or to fade.
+    p->is_stereo = false;
+    p->has_eye = true;
+}
+
+void SceneCompositor_FinishEye(void)
+{
+    M_PRIV *const p = &m_Priv;
+    if (!p->has_eye) {
+        p->fade = 0.0f;
+        return;
+    }
+    if (p->tint_amount > 0.0f || p->fade > 0.0f) {
+        M_Tint(p, p->eye_target.fbo, p->eye_target.width, p->eye_target.height);
+    }
+    p->tint_amount = 0.0f;
+    p->fade = 0.0f;
+    VR_Session_ReleaseEye(p->eye);
+    p->has_eye = false;
 }
 
 void SceneCompositor_BeginCapture(void)
@@ -252,6 +560,22 @@ void SceneCompositor_Flush(void)
     M_PROCESS_SOURCES(p, render_end);
     M_PROCESS_SOURCES(p, render_begin);
     glClear(GL_DEPTH_BUFFER_BIT);
+}
+
+void SceneCompositor_FlushDistant(void)
+{
+    M_PRIV *const p = &m_Priv;
+    // On a screen, both eyes get the same picture of it, set as far apart
+    // as anything goes: the camera does not move to the eye's side for it.
+    const float parallax = Output_GetStereoParallax();
+    const float convergence = Output_GetStereoConvergence();
+    Output_SetStereoDepth(parallax, 0.0f);
+    p->is_distant = true;
+    Output_Uniforms_SetDistant(true);
+    SceneCompositor_Flush();
+    Output_Uniforms_SetDistant(false);
+    p->is_distant = false;
+    Output_SetStereoDepth(parallax, convergence);
 }
 
 void SceneCompositor_EndScene(void)

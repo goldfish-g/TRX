@@ -8,6 +8,7 @@
 #include <trx/game/camera/environment.h>
 #include <trx/game/camera/fixed.h>
 #include <trx/game/camera/flyby_mode.h>
+#include <trx/game/camera/head.h>
 #include <trx/game/camera/photo_mode.h>
 #include <trx/game/camera/spline.h>
 #include <trx/game/camera/types.h>

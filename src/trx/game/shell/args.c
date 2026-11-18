@@ -50,6 +50,9 @@ static void M_ShowHelp(void)
     puts(
         "   --vr-no-mirror: keep the game window hidden while a headset "
         "shows the game.");
+    puts(
+        "   --vr-involved: start inside the game in the headset, not at the "
+        "theater.");
     puts("-q/--quiet: silence logs and only show errors.");
     puts("   --check-lua-api: load and seal the Lua API, then exit.");
     puts(
@@ -273,6 +276,9 @@ RESULT Shell_ParseArgs(VECTOR *const args, SHELL_ARGS **const out_args)
         }
         if (!strcmp(arg, "--vr-no-mirror")) {
             result->vr_no_mirror = true;
+        }
+        if (!strcmp(arg, "--vr-involved")) {
+            result->vr_involved = true;
         }
         if (!strcmp(arg, "--headless-fps") && next_arg != nullptr) {
             int32_t fps = 0;

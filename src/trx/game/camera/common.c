@@ -2,16 +2,23 @@
 
 #include <trx/config.h>
 #include <trx/game/camera.h>
+#include <trx/game/clock.h>
 #include <trx/game/cutseq.h>
 #include <trx/game/game.h>
 #include <trx/game/input.h>
+#include <trx/game/interpolation.h>
 #include <trx/game/lara.h>
 #include <trx/game/lara/poison.h>
 #include <trx/game/matrix.h>
 #include <trx/game/output.h>
+#include <trx/game/output/scene_compositor.h>
 #include <trx/game/random.h>
 #include <trx/game/rooms.h>
 #include <trx/game/viewport.h>
+#include <trx/vr/session.h>
+
+#include <math.h>
+#include <stdio.h>
 
 #define M_CHASE_ELEVATION (WALL_L * 3 / 2) // = 1536
 
@@ -317,13 +324,26 @@ void Camera_Apply(void)
         .y = g_Camera.interp.result.pos.y + g_Camera.interp.result.shift,
         .z = g_Camera.interp.result.pos.z,
     };
-    if (g_Camera.type == CAM_PHOTO_MODE) {
+    const VR_VIEW *const head =
+        SceneCompositor_IsStereo() ? VR_Session_GetView() : nullptr;
+    if (head != nullptr) {
+        Camera_ApplyHead(head);
+        return;
+    } else if (g_Camera.type == CAM_PHOTO_MODE) {
         Matrix_GenerateW2V(&view_pos, &g_Camera.interp.result.rot);
     } else {
         Matrix_LookAt(
             view_pos.x, view_pos.y, view_pos.z, g_Camera.interp.result.target.x,
             g_Camera.interp.result.target.y, g_Camera.interp.result.target.z,
             g_Camera.interp.result.roll);
+    }
+
+    // The camera is kept in whole units, and so is where it stands between
+    // two ticks. On a screen that passes; in a headset the view trembling
+    // by the rounding shows, on the sky most of all. So for a headset the
+    // place between the ticks is worked out again in fractions.
+    if (VR_Session_GetDrawnEye() >= 0 && g_Camera.type != CAM_PHOTO_MODE) {
+        Camera_RefineView();
     }
 
     XYZ_32 poison_scale;

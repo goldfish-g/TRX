@@ -20,6 +20,8 @@
 #include <trx/game/music.h>
 #include <trx/game/output.h>
 #include <trx/game/output/overlay.h>
+#include <trx/game/output/scene_compositor.h>
+#include <trx/game/random.h>
 #include <trx/game/savegame.h>
 #include <trx/game/shell.h>
 #include <trx/game/ui.h>
@@ -271,7 +273,7 @@ static PHASE_CONTROL M_Control(PHASE *const phase)
     };
 }
 
-static void M_Draw(PHASE *const phase)
+static void M_DrawOnce(PHASE *const phase)
 {
     BENCHMARK benchmark = Benchmark_Start();
 
@@ -290,7 +292,9 @@ static void M_Draw(PHASE *const phase)
     UI_Draw();
 
     Output_Flush();
+    Output_Overlay_DrawWorldBackdrop();
     Output_EndScene();
+    SceneCompositor_FinishEye();
 
     TRX_GL_GpuTimer_Collect();
     if (Shell_GetArgs()->debug_render_performance) {
@@ -325,6 +329,27 @@ static void M_Draw(PHASE *const phase)
         m_LastFlipMs = 0.0;
         TRX_GL_Track_Reset();
     }
+}
+
+// Draws a frame. For the theater of a VR headset the whole frame is drawn
+// twice, once as each eye sees it, and what the drawing changes as it goes is
+// put back in between so that both eyes see the same moment.
+static void M_Draw(PHASE *const phase)
+{
+    if (!VR_Session_IsStereo()) {
+        M_DrawOnce(phase);
+        return;
+    }
+    const int32_t seed = Random_GetDrawSeed();
+    const bool is_control_frame = Output_IsControlFrame();
+    VR_Session_SetDrawnEye(0);
+    M_DrawOnce(phase);
+    Random_SeedDraw(seed);
+    Output_SetControlFrame(false);
+    VR_Session_SetDrawnEye(1);
+    M_DrawOnce(phase);
+    VR_Session_SetDrawnEye(-1);
+    Output_SetControlFrame(is_control_frame);
 }
 
 // Draws the first frame of a phase again while the frames get faster, without

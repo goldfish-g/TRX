@@ -1,12 +1,16 @@
 #include <trx/vr/gamepad_openxr.h>
 
 #include <trx/core/log.h>
+#include <trx/vr/session.h>
 
 #include <SDL2/SDL.h>
 #include <string.h>
 
 // The far end of an axis of SDL.
 #define M_AXIS_MAX 32767
+
+// How many buttons, triggers and sticks the gamepad is made of.
+#define M_INPUT_COUNT 20
 
 // How far a stick has to lean to count as a direction of the d-pad.
 #define M_DPAD_THRESHOLD 0.5f
@@ -31,16 +35,6 @@ typedef enum {
     M_PROFILE_NUMBER_OF,
 } M_PROFILE;
 
-static const char *const m_ProfilePaths[M_PROFILE_NUMBER_OF] = {
-    // SteamVR knows the controllers of the Steam Frame under two names: the
-    // one its documentation gives, and the one it reports them as.
-    [M_PROFILE_FRAME] = "/interaction_profiles/valve/frame_controller",
-    [M_PROFILE_FRAME_VALVE] =
-        "/interaction_profiles/valve/frame_controller_valve",
-    [M_PROFILE_TOUCH] = "/interaction_profiles/oculus/touch_controller",
-    [M_PROFILE_INDEX] = "/interaction_profiles/valve/index_controller",
-};
-
 // One button, trigger or stick of the gamepad, and where the controllers of
 // each kind carry it. A path that is nullptr leaves it out for that kind.
 typedef struct {
@@ -53,7 +47,17 @@ typedef struct {
     const char *paths[M_PROFILE_NUMBER_OF];
 } M_INPUT;
 
-static const M_INPUT m_Inputs[] = {
+static const char *const m_ProfilePaths[M_PROFILE_NUMBER_OF] = {
+    // SteamVR knows the controllers of the Steam Frame under two names: the
+    // one its documentation gives, and the one it reports them as.
+    [M_PROFILE_FRAME] = "/interaction_profiles/valve/frame_controller",
+    [M_PROFILE_FRAME_VALVE] =
+        "/interaction_profiles/valve/frame_controller_valve",
+    [M_PROFILE_TOUCH] = "/interaction_profiles/oculus/touch_controller",
+    [M_PROFILE_INDEX] = "/interaction_profiles/valve/index_controller",
+};
+
+static const M_INPUT m_Inputs[M_INPUT_COUNT] = {
     // clang-format off
     { "a", "A", M_KIND_BUTTON, SDL_CONTROLLER_BUTTON_A, {
         [M_PROFILE_FRAME] = "/user/hand/right/input/a/click",
@@ -158,8 +162,6 @@ static const M_INPUT m_Inputs[] = {
     // clang-format on
 };
 
-#define M_INPUT_COUNT ((int32_t)(sizeof(m_Inputs) / sizeof(m_Inputs[0])))
-
 static XrActionSet m_ActionSet = XR_NULL_HANDLE;
 static XrAction m_Actions[M_INPUT_COUNT] = {};
 static XrInstance m_Instance = XR_NULL_HANDLE;
@@ -209,8 +211,10 @@ static RESULT M_SuggestBindings(
     uint32_t count = 0;
     for (int32_t i = 0; i < M_INPUT_COUNT; i++) {
         const M_INPUT *const input = &m_Inputs[i];
-        const char *const path = input->paths[
-            profile_id == M_PROFILE_FRAME_VALVE ? M_PROFILE_FRAME : profile_id];
+        const char *const path =
+            input->paths
+                [profile_id == M_PROFILE_FRAME_VALVE ? M_PROFILE_FRAME
+                                                     : profile_id];
         if (path == nullptr) {
             continue;
         }
@@ -370,15 +374,15 @@ void VR_Gamepad_Update(const XrSession session)
             XrActionStateBoolean state = { .type =
                                                XR_TYPE_ACTION_STATE_BOOLEAN };
             const bool is_down = is_live
-                && XR_SUCCEEDED(
-                    xrGetActionStateBoolean(session, &get_info, &state))
+                && XR_SUCCEEDED(xrGetActionStateBoolean(
+                    session, &get_info, &state))
                 && state.isActive && state.currentState;
             buttons[input->target] |= is_down;
         } else if (input->kind == M_KIND_TRIGGER) {
             XrActionStateFloat state = { .type = XR_TYPE_ACTION_STATE_FLOAT };
             const bool is_read = is_live
-                && XR_SUCCEEDED(
-                    xrGetActionStateFloat(session, &get_info, &state))
+                && XR_SUCCEEDED(xrGetActionStateFloat(
+                    session, &get_info, &state))
                 && state.isActive;
             // A trigger of SDL rests at the bottom of its range.
             const float value = is_read ? state.currentState : 0.0f;
@@ -388,8 +392,8 @@ void VR_Gamepad_Update(const XrSession session)
             XrActionStateVector2f state = { .type =
                                                 XR_TYPE_ACTION_STATE_VECTOR2F };
             const bool is_read = is_live
-                && XR_SUCCEEDED(
-                    xrGetActionStateVector2f(session, &get_info, &state))
+                && XR_SUCCEEDED(xrGetActionStateVector2f(
+                    session, &get_info, &state))
                 && state.isActive;
             const float x = is_read ? state.currentState.x : 0.0f;
             const float y = is_read ? state.currentState.y : 0.0f;
@@ -409,6 +413,16 @@ void VR_Gamepad_Update(const XrSession session)
                 m_Joystick, input->target + 1, M_ToAxis(-y));
         }
     }
+    // Both sticks pressed in together switch between the screen and the
+    // view from inside the game.
+    static bool was_combo_down = false;
+    const bool is_combo_down = buttons[SDL_CONTROLLER_BUTTON_LEFTSTICK]
+        && buttons[SDL_CONTROLLER_BUTTON_RIGHTSTICK];
+    if (is_combo_down && !was_combo_down) {
+        VR_Session_ToggleMode();
+    }
+    was_combo_down = is_combo_down;
+
     for (int32_t i = 0; i < SDL_CONTROLLER_BUTTON_MAX; i++) {
         SDL_JoystickSetVirtualButton(m_Joystick, i, buttons[i]);
     }

@@ -30,6 +30,7 @@
 #include <trx/gl/renderer.h>
 #include <trx/gl/track.h>
 #include <trx/version.h>
+#include <trx/vr/session.h>
 
 static MESH_BATCHER *m_Batcher = nullptr;
 static OUTPUT_UNIFORMS *m_Uniforms = nullptr;
@@ -158,6 +159,9 @@ void Output_KeepPreviousFrame(void)
 
 void Output_BeginScene(void)
 {
+    // A VR headset says when the frame is due and where the head will be
+    // when it is shown, which the camera needs before anything is drawn.
+    VR_Session_BeginFrame();
     Output_ApplyFOV();
     // Resize framebuffers before the first frame draws into them.
     TRX_GL_Renderer_SyncFboSizes();

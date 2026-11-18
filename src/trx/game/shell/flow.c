@@ -398,9 +398,16 @@ int32_t Shell_Main(const SHELL_ARGS *const args)
     EXIT_ON_FAIL(M_CreateGLContext(), "TRX cannot draw the game");
     if (s->args->vr) {
         // Without a headset the game still plays in its window.
+        const bool was_active = VR_Session_IsActive();
         SHOULD(
             VR_Session_Start(m_Window),
             "the game will not be shown in a headset");
+        // Only for a session that just opened: one that is carried over a
+        // switch of games keeps the view the player left it in.
+        if (!was_active && VR_Session_IsActive() && s->args->vr_involved
+            && VR_Session_GetMode() == VR_MODE_THEATER) {
+            VR_Session_ToggleMode();
+        }
     }
     EXIT_ON_FAIL(Output_Init(), "TRX cannot draw the game");
     // A headset that runs the game itself shows every window it finds as a

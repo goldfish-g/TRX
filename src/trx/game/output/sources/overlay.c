@@ -17,6 +17,7 @@
 #include <trx/game/output.h>
 #include <trx/game/output/common.h>
 #include <trx/game/output/const.h>
+#include <trx/game/output/lights.h>
 #include <trx/game/output/overlay.h>
 #include <trx/game/output/quad.h>
 #include <trx/game/output/scene_compositor.h>
@@ -29,6 +30,8 @@
 #include <trx/gl/renderer.h>
 #include <trx/gl/texture.h>
 #include <trx/gl/utils.h>
+#include <trx/version.h>
+#include <trx/vr/session.h>
 
 #include <float.h>
 #include <math.h>
@@ -140,7 +143,17 @@ typedef struct {
         TRX_GL_FBO blurred;
         uint32_t blurred_generation;
         float blurred_amount;
+        // Whether the snapshot is of a level, as opposed to a video or a
+        // menu that was on screen.
+        bool is_game;
     } snapshot;
+    // The level drawn around a player in VR in place of a snapshot of it,
+    // asked for while the interface is drawn and done once it is.
+    struct {
+        bool is_wanted;
+        float amount;
+        RGB_F tint;
+    } backdrop;
     struct {
         OUTPUT_QUAD *renderer;
         bool uploaded;
@@ -531,6 +544,16 @@ static void M_ScheduleOpHelper(
     memcpy(op, op_src, size);
     op->draw = draw_func;
     M_ScheduleOp(p, op);
+}
+
+// Whether the level itself is to be drawn behind a menu in VR, where a
+// screen would show a picture of it. The picture is flat; the level keeps
+// its depth, around a player who is inside the game and behind the screen
+// of the theater alike.
+static bool M_KeepsWorldAround(const char *const image_path)
+{
+    return image_path == nullptr && m_Priv.snapshot.is_game
+        && VR_Session_GetDrawnEye() >= 0;
 }
 
 static void M_DrawOp_BlackRectangle(const M_DRAW_OP *const base)
@@ -963,6 +986,7 @@ void Output_Overlay_DrawImageInBox(
 void Output_Overlay_CaptureSnapshot(void)
 {
     M_PRIV *const p = &m_Priv;
+    p->snapshot.is_game = false;
     p->snapshot.state.has_content = false;
 
     M_EnsureSnapshotTexture(p, &p->snapshot.state, VIEWPORT_TARGET);
@@ -983,6 +1007,7 @@ void Output_Overlay_CaptureSnapshot(void)
 
 void Output_Overlay_CaptureGameSnapshot(void)
 {
+    m_Priv.snapshot.is_game = !FMV_IsPlaying();
     // An FMV has no scene to draw again, so the snapshot keeps its frame as
     // it is on screen.
     if (FMV_IsPlaying()) {
@@ -1043,6 +1068,9 @@ int32_t Output_Overlay_CaptureSnapshotSlot(void)
 void Output_Overlay_DrawSnapshotSlot(const int32_t slot, const float opacity)
 {
     const M_PRIV *const p = &m_Priv;
+    if (Output_Overlay_IsWorldAround()) {
+        return;
+    }
     if (slot < 0 || slot >= OUTPUT_OVERLAY_SNAPSHOT_SLOTS
         || !p->snapshot.slot_in_use[slot] || opacity <= 0.0f) {
         return;
@@ -1082,6 +1110,11 @@ void Output_Overlay_DrawSnapshotEx(
     const OUTPUT_SNAPSHOT_SETTINGS *const settings)
 {
     const M_PRIV *const p = &m_Priv;
+    // A picture of the level has no place where the level itself is around
+    // the player.
+    if (Output_Overlay_IsWorldAround()) {
+        return;
+    }
     if (!p->snapshot.state.has_content
         || !p->snapshot.state.texture.initialized) {
         return;
@@ -1166,10 +1199,65 @@ OUTPUT_BACKGROUND_TINT Output_Overlay_GetBackgroundTint(
     return tint;
 }
 
+bool Output_Overlay_IsWorldAround(void)
+{
+    const int32_t eye = VR_Session_GetDrawnEye();
+    return eye >= 0 && VR_Session_GetMode() == VR_MODE_INVOLVED
+        && (VR_Session_IsEyeDrawn(eye) || m_Priv.backdrop.is_wanted);
+}
+
+bool Output_Overlay_IsWorldBehind(void)
+{
+    return VR_Session_GetDrawnEye() >= 0
+        && (Output_Overlay_IsWorldAround() || m_Priv.backdrop.is_wanted);
+}
+
+void Output_Overlay_DrawWorldBackdrop(void)
+{
+    M_PRIV *const p = &m_Priv;
+    if (!p->backdrop.is_wanted) {
+        return;
+    }
+    p->backdrop.is_wanted = false;
+    const int32_t eye = VR_Session_GetDrawnEye();
+    if (eye < 0 || VR_Session_IsEyeDrawn(eye)) {
+        return;
+    }
+    // In the theater the scene goes into its framebuffer as ever, under the
+    // interface, which nothing has drawn into in a frame that asks for
+    // this.
+    TRX_GL_Renderer_BindGeometryFbo();
+    // The menu's own lights are for its models, not for the level.
+    const bool was_inventory_lit = Output_IsInventoryLightingMode();
+    Output_SetInventoryLightingMode(false);
+    SceneCompositor_SetWorldTint(p->backdrop.amount, p->backdrop.tint);
+    Interpolation_Disable();
+    Output_SwitchViewport(VIEWPORT_GAME);
+    Game_Draw(false);
+    // Around the player the tint went onto the eye's picture as that was
+    // finished; on a screen it goes onto the scene now.
+    SceneCompositor_TintScene();
+    Interpolation_Enable();
+    Output_SetInventoryLightingMode(was_inventory_lit);
+}
+
 void Output_Overlay_DrawBackground(
     const BACKGROUND_TYPE style, const float opacity,
     const char *const image_path)
 {
+    if (M_KeepsWorldAround(image_path)) {
+        // The level goes gray around the player, with a red cast in the
+        // second game, whose menus are red, and nothing flat is put over it.
+        M_PRIV *const p = &m_Priv;
+        p->backdrop.is_wanted = true;
+        p->backdrop.amount = opacity;
+        p->backdrop.tint = g_TRVersion == 2
+            ? Color_Mix(
+                  COLOR_RGB_F_WHITE, ((RGB_F) { 1.0f, 0.55f, 0.55f }), opacity)
+            : COLOR_RGB_F_WHITE;
+        return;
+    }
+
     switch (style) {
     case BK_PATTERN_STATIC:
     case BK_PATTERN_WAVE:
@@ -1210,6 +1298,11 @@ void Output_Overlay_DrawBackground(
 
 void Output_Overlay_DrawBlackRectangle(const float opacity)
 {
+    // Around a player in VR the level itself goes dark.
+    if (Output_Overlay_IsWorldAround()) {
+        SceneCompositor_AddWorldFade(opacity);
+        return;
+    }
     if (opacity > 0.0f) {
         M_SCHEDULE_OP(
             M_DrawOp_BlackRectangle,
@@ -1264,6 +1357,12 @@ float Output_Overlay_GetFade(void)
 
 void Output_Overlay_DrawLetterbox(void)
 {
+    // Around a player in VR the level itself fades, and has no edges for
+    // bars to cover.
+    if (SceneCompositor_IsStereo()) {
+        SceneCompositor_AddWorldFade(m_Fade);
+        return;
+    }
     Output_DrawScreenBlack(m_Fade);
     if (m_Letterbox <= 0.0f) {
         return;

@@ -9,6 +9,8 @@
 #include <trx/game/output.h>
 #include <trx/game/output/bind.h>
 #include <trx/game/output/const.h>
+#include <trx/game/output/overlay.h>
+#include <trx/game/output/scene_compositor.h>
 #include <trx/game/output/sources/lightnings.h>
 #include <trx/game/output/sources/misc.h>
 #include <trx/game/output/sources/objects.h>
@@ -140,6 +142,17 @@ void Output_DrawScreenFlatQuad(
     const int32_t sx, const int32_t sy, const int32_t z, const int32_t w,
     const int32_t h, const RGBA_8888 color)
 {
+    // A black sheet over the whole screen is a fade. Around a player in VR
+    // the level itself fades, where the sheet would be a black board
+    // hanging in it.
+    const bool is_whole_screen = sx <= 0 && sy <= 0
+        && sx + w >= Viewport_GetWidth(VIEWPORT_UI)
+        && sy + h >= Viewport_GetHeight(VIEWPORT_UI);
+    if (is_whole_screen && color.r == 0 && color.g == 0 && color.b == 0
+        && Output_Overlay_IsWorldAround()) {
+        SceneCompositor_AddWorldFade(color.a / 255.0f);
+        return;
+    }
     M_DrawScreenQuad(sx, sy, sx + w, sy + h, z, color, color, color, color);
 }
 

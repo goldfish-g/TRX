@@ -76,6 +76,8 @@ typedef struct {
     M_UNIFORM_LIGHTS last_lights;
 } M_PRIV;
 
+static bool m_IsDistant = false;
+
 static void M_FillLight(
     M_UNIFORM_LIGHT *const dst_light, const OUTPUT_DYNAMIC_LIGHT *const entry)
 {
@@ -134,6 +136,33 @@ static bool M_ResolveVertexSnapResolution(float resolution[2])
     return true;
 }
 
+// Fills in the view that things are drawn with. The view in whole numbers
+// lands on a slightly different place from frame to frame for a camera that
+// moves evenly, which shows as a tremble on a headset, so where the game's
+// view has an exact form, that is what is drawn with.
+static void M_FillView(float out[4][4], const MATRIX *const matrix)
+{
+    Output_FillMatrix(out, matrix);
+    if (matrix != &g_ViewMatrix || !g_ViewMatrixIsExact) {
+        return;
+    }
+    for (int32_t row = 0; row < 3; row++) {
+        for (int32_t col = 0; col < 4; col++) {
+            out[col][row] = (float)g_ViewMatrixExact[row][col];
+        }
+    }
+    // What is too far to have a place, such as the sky, is put around the
+    // camera where the game takes it to be, in whole units. It must not
+    // drift by the fraction the exact view is off from there.
+    if (m_IsDistant) {
+        for (int32_t row = 0; row < 3; row++) {
+            out[3][row] = -(float)(g_ViewMatrixExact[row][0] * g_ViewPos.x
+                                   + g_ViewMatrixExact[row][1] * g_ViewPos.y
+                                   + g_ViewMatrixExact[row][2] * g_ViewPos.z);
+        }
+    }
+}
+
 void Output_Uniforms_UploadOrthoMatrix(const OUTPUT_UNIFORMS *const uniforms)
 {
     M_UNIFORM_MATRICES matrices = {};
@@ -145,12 +174,43 @@ void Output_Uniforms_UploadOrthoMatrix(const OUTPUT_UNIFORMS *const uniforms)
         glBufferSubData, GL_UNIFORM_BUFFER, 0, sizeof(matrices), &matrices);
 }
 
+void Output_Uniforms_SetDistant(const bool is_distant)
+{
+    m_IsDistant = is_distant;
+}
+
 void Output_Uniforms_UploadViewMatrix(
     const OUTPUT_UNIFORMS *const uniforms, const MATRIX *const matrix)
 {
     M_UNIFORM_MATRICES matrices = {};
     Output_GetPerspProjectionMatrix(matrices.mat_proj);
-    Output_FillMatrix(matrices.mat_view, matrix);
+    M_FillView(matrices.mat_view, matrix);
+    // The other half of what the projection does for an eye of the theater:
+    // the camera stands to that eye's side.
+    const int32_t eye = VR_Session_GetDrawnEye();
+    if (eye >= 0) {
+        const float shift = Output_GetStereoParallax()
+            * Output_GetStereoConvergence() / matrices.mat_proj[0][0];
+        matrices.mat_view[3][0] += eye == 0 ? shift : -shift;
+    }
+
+    glBindBuffer(GL_UNIFORM_BUFFER, uniforms->matrices);
+    TRX_GL_TRACK_SUBDATA(
+        glBufferSubData, GL_UNIFORM_BUFFER, 0, sizeof(matrices), &matrices);
+}
+
+void Output_Uniforms_UploadEyeMatrix(
+    const OUTPUT_UNIFORMS *const uniforms, const MATRIX *const matrix,
+    const VR_EYE *const eye)
+{
+    M_UNIFORM_MATRICES matrices = {};
+    Output_GetEyeProjectionMatrix(matrices.mat_proj, eye);
+    M_FillView(matrices.mat_view, matrix);
+    // The eye sits to the side of the head, in the head's own axes, which
+    // count up and backwards where the view counts down and forwards.
+    matrices.mat_view[3][0] -= eye->offset[0] * VR_UNITS_PER_METER;
+    matrices.mat_view[3][1] += eye->offset[1] * VR_UNITS_PER_METER;
+    matrices.mat_view[3][2] += eye->offset[2] * VR_UNITS_PER_METER;
 
     glBindBuffer(GL_UNIFORM_BUFFER, uniforms->matrices);
     TRX_GL_TRACK_SUBDATA(

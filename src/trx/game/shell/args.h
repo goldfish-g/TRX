@@ -37,6 +37,8 @@ typedef struct {
     bool vr;
     // Whether to keep the game window hidden while a headset shows the game.
     bool vr_no_mirror;
+    // Whether to start with the player inside the game, not at the theater.
+    bool vr_involved;
     bool debug_render_performance;
     int32_t headless_fps; // in headless mode, force fixed fps (0 = unlocked)
     bool quiet;

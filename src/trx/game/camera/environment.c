@@ -129,7 +129,19 @@ void Camera_RefreshFromTrigger(const TRIGGER *const trigger)
 
 void Camera_EnsureEnvironment(void)
 {
-    if (g_Camera.mic_pos.room_num != NO_ROOM) {
+    // A player in VR is under water when their own head is, wherever the
+    // game's camera happens to be.
+    if (Camera_IsOnHead()) {
+        const ROOM *const room = Room_Get(Camera_GetHeadRoom());
+        g_Camera.underwater = room->flags.underwater;
+        if (room->flags.underwater) {
+            M_AdjustMusicVolume(true);
+            Sound_Effect(SFX_UNDERWATER, nullptr, SPM_ALWAYS);
+        } else {
+            M_AdjustMusicVolume(false);
+            Sound_StopEffect(SFX_UNDERWATER);
+        }
+    } else if (g_Camera.mic_pos.room_num != NO_ROOM) {
         const ROOM *const room = Room_Get(g_Camera.mic_pos.room_num);
         if (room->flags.underwater) {
             M_AdjustMusicVolume(true);
@@ -140,7 +152,7 @@ void Camera_EnsureEnvironment(void)
         }
     }
 
-    if (g_Camera.pos.room_num != NO_ROOM) {
+    if (!Camera_IsOnHead() && g_Camera.pos.room_num != NO_ROOM) {
         const ROOM *const room = Room_Get(g_Camera.pos.room_num);
         g_Camera.underwater = room->flags.underwater;
     }

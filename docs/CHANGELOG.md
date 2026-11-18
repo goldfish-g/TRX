@@ -2,7 +2,7 @@
 **Platforms**
 - Added a build for web browsers, which runs the games through WebGL 2 in a web page that hosts them (see BUILDING_FOR_WEB.md)
 - Added a Linux build for arm64, which runs natively on devices such as the Steam Frame
-- Added experimental support for VR headsets through OpenXR, which shows the game on a screen in front of the player when started with `--vr` (needs a build with the `vr` option)
+- Added experimental support for VR headsets through OpenXR, which shows the game in 3D when started with `--vr`, either on a screen in front of the player or around the player, following Lara (needs a build with the `vr` option)
 
 **Rendering**
 - Fixed certain sparks, such as smoke and gas, not being drawn during fixed or cinematic camera sequences when Lara is far from the spawn position (OG bug) (TRX1966)

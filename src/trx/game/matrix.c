@@ -27,6 +27,8 @@ MATRIX *g_WMatrixPtr = &m_WMatrixStack[0];
 
 XYZ_32 g_ViewPos = {};
 MATRIX g_ViewMatrix = {};
+double g_ViewMatrixExact[3][4] = {};
+bool g_ViewMatrixIsExact = false;
 MATRIX g_IDMatrix = {
     // clang-format off
     ._00 = 1 << W2V_SHIFT, ._01 = 0, ._02 = 0, ._03 = 0,
@@ -506,6 +508,7 @@ void Matrix_ResetStack(void)
 void Matrix_GenerateW2V(const XYZ_32 *pos, const XYZ_16 *rot)
 {
     g_ViewPos = *pos;
+    g_ViewMatrixIsExact = false;
 
     // The view takes the world into the camera's own axes, which is the
     // rotation the camera stands at, undone.
@@ -521,8 +524,129 @@ void Matrix_GenerateW2V(const XYZ_32 *pos, const XYZ_16 *rot)
     g_WMatrixPtr[0] = g_IDMatrix;
 }
 
+void Matrix_MoveW2V(const double rot[3][3], const double offset[3])
+{
+    const double one = (double)(1 << W2V_SHIFT);
+    const double old[3][4] = {
+        { g_ViewMatrix._00, g_ViewMatrix._01, g_ViewMatrix._02,
+          g_ViewMatrix._03 },
+        { g_ViewMatrix._10, g_ViewMatrix._11, g_ViewMatrix._12,
+          g_ViewMatrix._13 },
+        { g_ViewMatrix._20, g_ViewMatrix._21, g_ViewMatrix._22,
+          g_ViewMatrix._23 },
+    };
+    double new[3][4];
+    for (int32_t i = 0; i < 3; i++) {
+        for (int32_t j = 0; j < 4; j++) {
+            new[i][j] = rot[i][0] * old[0][j] + rot[i][1] * old[1][j]
+                + rot[i][2] * old[2][j];
+        }
+        new[i][3] += offset[i] * one;
+    }
+    g_ViewMatrix = (MATRIX) {
+        ._00 = llround(new[0][0]),
+        ._01 = llround(new[0][1]),
+        ._02 = llround(new[0][2]),
+        ._03 = llround(new[0][3]),
+        ._10 = llround(new[1][0]),
+        ._11 = llround(new[1][1]),
+        ._12 = llround(new[1][2]),
+        ._13 = llround(new[1][3]),
+        ._20 = llround(new[2][0]),
+        ._21 = llround(new[2][1]),
+        ._22 = llround(new[2][2]),
+        ._23 = llround(new[2][3]),
+    };
+    // Where the camera now stands in the world: the point the view puts at
+    // its origin.
+    g_ViewPos = (XYZ_32) {
+        .x = -lround(
+            (new[0][0] * new[0][3] + new[1][0] * new[1][3]
+             + new[2][0] * new[2][3])
+            / (one * one)),
+        .y = -lround(
+            (new[0][1] * new[0][3] + new[1][1] * new[1][3]
+             + new[2][1] * new[2][3])
+            / (one * one)),
+        .z = -lround(
+            (new[0][2] * new[0][3] + new[1][2] * new[1][3]
+             + new[2][2] * new[2][3])
+            / (one * one)),
+    };
+    for (int32_t i = 0; i < 3; i++) {
+        for (int32_t j = 0; j < 4; j++) {
+            g_ViewMatrixExact[i][j] = new[i][j] / one;
+        }
+    }
+    g_ViewMatrixIsExact = true;
+    m_MatrixStack[0] = g_ViewMatrix;
+}
+
+void Matrix_RefineW2V(const double pos[3], const double forward[3])
+{
+    const double one = (double)(1 << W2V_SHIFT);
+    const double length = sqrt(
+        forward[0] * forward[0] + forward[1] * forward[1]
+        + forward[2] * forward[2]);
+    if (length < 1.0) {
+        return;
+    }
+    // The view's rows are the camera's own axes in the world: right, down
+    // and forwards. Forwards is given; right is kept as near as it can be to
+    // where the rounded view has it, which carries the camera's roll over;
+    // down then follows from the two, on the side the rounded view has it.
+    const double z[3] = {
+        forward[0] / length,
+        forward[1] / length,
+        forward[2] / length,
+    };
+    const double old_x[3] = {
+        g_ViewMatrix._00 / one,
+        g_ViewMatrix._01 / one,
+        g_ViewMatrix._02 / one,
+    };
+    const double old_y[3] = {
+        g_ViewMatrix._10 / one,
+        g_ViewMatrix._11 / one,
+        g_ViewMatrix._12 / one,
+    };
+    const double along = old_x[0] * z[0] + old_x[1] * z[1] + old_x[2] * z[2];
+    double x[3] = {
+        old_x[0] - along * z[0],
+        old_x[1] - along * z[1],
+        old_x[2] - along * z[2],
+    };
+    const double x_length = sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
+    if (x_length < 0.5) {
+        return;
+    }
+    for (int32_t i = 0; i < 3; i++) {
+        x[i] /= x_length;
+    }
+    double y[3] = {
+        z[1] * x[2] - z[2] * x[1],
+        z[2] * x[0] - z[0] * x[2],
+        z[0] * x[1] - z[1] * x[0],
+    };
+    if (y[0] * old_y[0] + y[1] * old_y[1] + y[2] * old_y[2] < 0.0) {
+        for (int32_t i = 0; i < 3; i++) {
+            y[i] = -y[i];
+        }
+    }
+    const double *const rows[3] = { x, y, z };
+    for (int32_t i = 0; i < 3; i++) {
+        for (int32_t j = 0; j < 3; j++) {
+            g_ViewMatrixExact[i][j] = rows[i][j];
+        }
+        g_ViewMatrixExact[i][3] =
+            -(rows[i][0] * pos[0] + rows[i][1] * pos[1] + rows[i][2] * pos[2]);
+    }
+    g_ViewMatrixIsExact = true;
+}
+
 void Matrix_ScaleW2V(const XYZ_32 scale)
 {
+    g_ViewMatrixIsExact = false;
     // scale the columns (world axes), matching the original engine's
     // ScaleCurrentMatrix, then rebuild the translation through the scaled
     // rotation so the warp stays centered on the camera
@@ -545,6 +669,7 @@ void Matrix_ScaleW2V(const XYZ_32 scale)
 
 void Matrix_ShearW2V(const float kx, const float ky)
 {
+    g_ViewMatrixIsExact = false;
     g_ViewMatrix._00 += (int32_t)(kx * g_ViewMatrix._20);
     g_ViewMatrix._01 += (int32_t)(kx * g_ViewMatrix._21);
     g_ViewMatrix._02 += (int32_t)(kx * g_ViewMatrix._22);
@@ -558,6 +683,7 @@ void Matrix_ShearW2V(const float kx, const float ky)
 
 void Matrix_SquashW2V(void)
 {
+    g_ViewMatrixIsExact = false;
     g_ViewMatrix._10 -= g_ViewMatrix._10 >> 2;
     g_ViewMatrix._11 -= g_ViewMatrix._11 >> 2;
     g_ViewMatrix._12 -= g_ViewMatrix._12 >> 2;

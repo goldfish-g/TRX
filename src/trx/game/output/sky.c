@@ -362,7 +362,7 @@ bool Output_Sky_Draw(void)
             g_WMatrixPtr, mesh, Output_GetFogColor());
     }
     OutputSource_Objects_StageObjectMesh(mesh);
-    SceneCompositor_Flush();
+    SceneCompositor_FlushDistant();
     Matrix_Pop();
     return true;
 }

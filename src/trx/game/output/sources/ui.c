@@ -12,6 +12,7 @@
 #include <trx/game/output.h>
 #include <trx/game/output/const.h>
 #include <trx/game/output/func.h>
+#include <trx/game/output/overlay.h>
 #include <trx/game/output/scene_compositor.h>
 #include <trx/game/output/sources/objects.h>
 #include <trx/game/output/state.h>
@@ -21,6 +22,7 @@
 #include <trx/gl/renderer.h>
 #include <trx/gl/utils.h>
 #include <trx/version.h>
+#include <trx/vr/session.h>
 
 #include <math.h>
 
@@ -442,6 +444,24 @@ static void M_DrawMeshes(const M_PRIV *const p)
     const int32_t old_fog_end = Output_GetFogEnd();
     Output_SetFogStart(20 * WALL_L);
     Output_SetFogEnd(100 * WALL_L);
+    // The models come much closer to their camera than the world does to
+    // the game's, and must not stand out in front of the text over them.
+    // Around a player inside the game the screen hangs in the world, with
+    // walls that may be nearer than it, so there the models keep close to
+    // its plane instead of reaching far behind it.
+    // The text was moved forward as a whole; the models go back to where
+    // the panel is and take their depth from there.
+    const int32_t text_shift = SceneCompositor_GetPanelTextShift();
+    GLint text_viewport[4];
+    glGetIntegerv(GL_VIEWPORT, text_viewport);
+    glViewport(
+        text_viewport[0] - text_shift, text_viewport[1], text_viewport[2],
+        text_viewport[3]);
+    if (Output_Overlay_IsWorldBehind()) {
+        Output_SetStereoDepth(VR_PANEL_PARALLAX, VR_PANEL_CONVERGENCE);
+    } else {
+        Output_SetStereoDepth(VR_SCREEN_PARALLAX, VR_UI_CONVERGENCE);
+    }
 
     for (int32_t i = 0; i < p->scheduled_meshes->count; i++) {
         const OUTPUT_UI_MESH *const mesh = Vector_Get(p->scheduled_meshes, i);
@@ -533,6 +553,9 @@ static void M_DrawMeshes(const M_PRIV *const p)
         }
     }
 
+    Output_SetStereoDepth(VR_SCREEN_PARALLAX, VR_WORLD_CONVERGENCE);
+    glViewport(
+        text_viewport[0], text_viewport[1], text_viewport[2], text_viewport[3]);
     Output_SetFogStart(old_fog_start);
     Output_SetFogEnd(old_fog_end);
     SceneCompositor_SetSamplerFilter(g_Config.rendering.ui_filter);

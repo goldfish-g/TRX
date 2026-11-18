@@ -398,6 +398,22 @@ static void M_DrawOp_Sprite(const M_DRAW_OP *const base)
 static void M_DrawOp_Quad(const M_DRAW_OP *const base)
 {
     const M_DRAW_OP_QUAD *const op = (const M_DRAW_OP_QUAD *)base;
+    // A black sheet over the whole screen is a fade. Around a player in VR
+    // the level itself fades, where the sheet would be a black board
+    // hanging in it.
+    const bool is_whole_screen = op->x0 <= 0 && op->y0 <= 0
+        && op->x1 >= Viewport_GetWidth(VIEWPORT_UI)
+        && op->y1 >= Viewport_GetHeight(VIEWPORT_UI);
+    const bool is_black = (op->tl.r | op->tl.g | op->tl.b) == 0
+        && (op->tr.r | op->tr.g | op->tr.b) == 0
+        && (op->bl.r | op->bl.g | op->bl.b) == 0
+        && (op->br.r | op->br.g | op->br.b) == 0;
+    if (is_whole_screen && is_black && Output_Overlay_IsWorldAround()) {
+        const uint8_t alpha =
+            MAX(MAX(op->tl.a, op->tr.a), MAX(op->bl.a, op->br.a));
+        SceneCompositor_AddWorldFade(alpha / 255.0f);
+        return;
+    }
     M_DrawScreenQuad(
         op->x0, op->y0, op->x1, op->y1, op->z, op->tl, op->tr, op->bl, op->br);
 }

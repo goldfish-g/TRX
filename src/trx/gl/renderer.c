@@ -300,18 +300,53 @@ static void M_Render(TRX_GL_RENDERER *renderer)
     }
 }
 
-// Shows the frame on the screen in the headset, where there is one. The
-// window still gets the frame after this, as a mirror.
+// Draws the interface alone into the given framebuffer, clear where there is
+// none of it, for a screen that hangs over a scene drawn elsewhere.
+static void M_CompositeUi(
+    M_CONTEXT *const p, const GLuint dst_fbo, const VIEWPORT_RECT rect)
+{
+    const TRX_GL_FBO *const ui_fbo = M_ResolveUi(p);
+
+    M_BindQuadState(p);
+    glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
+    TRX_GL_Sampler_Parameteri(&p->sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    TRX_GL_Sampler_Parameteri(&p->sampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    TRX_GL_Program_Uniform1i(&p->program, p->loc_dither_mode, 0);
+    TRX_GL_Program_Uniform1i(&p->program, p->loc_palette_lut_size, 0);
+    glViewport(rect.x, rect.y, rect.width, rect.height);
+    const GLfloat clear[4] = {};
+    glClearBufferfv(GL_COLOR, 0, clear);
+    M_Blit(p, ui_fbo);
+}
+
+// Shows the frame in the headset, where there is one. Where the world was
+// drawn for the eyes, the screen carries only the interface over it;
+// otherwise it carries the whole frame. The window still gets the frame
+// after this, as a mirror.
 static void M_PresentToHeadset(M_CONTEXT *const p)
 {
-    VR_SCREEN screen;
-    if (!VR_Session_BeginFrame(&screen)) {
+    if (!VR_Session_BeginFrame()) {
         return;
     }
-    if (screen.fbo != 0) {
-        M_Composite(
-            p, screen.fbo,
-            (VIEWPORT_RECT) { .width = screen.width, .height = screen.height });
+    // In the theater the frame is drawn once for each eye, and goes to the
+    // headset when the second is in.
+    const int32_t eye = VR_Session_GetDrawnEye();
+    VR_SCREEN screen;
+    if (VR_Session_AcquireScreen(eye == 1 ? 1 : 0, &screen)) {
+        const VIEWPORT_RECT rect = {
+            .width = screen.width,
+            .height = screen.height,
+        };
+        // Where the world went around the player for this eye, the screen
+        // carries only the interface.
+        if (VR_Session_IsEyeDrawn(eye == 1 ? 1 : 0)) {
+            M_CompositeUi(p, screen.fbo, rect);
+        } else {
+            M_Composite(p, screen.fbo, rect);
+        }
+    }
+    if (eye == 0) {
+        return;
     }
     const VIEWPORT_RECT target = Viewport_GetRect(VIEWPORT_TARGET);
     VR_Session_EndFrame((float)target.width / (float)MAX(target.height, 1));

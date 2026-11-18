@@ -37,6 +37,10 @@ extern MATRIX *g_MatrixPtr;
 extern MATRIX *g_WMatrixPtr;
 extern XYZ_32 g_ViewPos;
 extern MATRIX g_ViewMatrix;
+// The view before it was rounded to whole numbers, in world units, where
+// Matrix_MoveW2V made it. Anything else that sets the view clears the flag.
+extern double g_ViewMatrixExact[3][4];
+extern bool g_ViewMatrixIsExact;
 extern MATRIX g_IDMatrix;
 
 void Matrix_ResetStack(void);
@@ -45,6 +49,17 @@ void Matrix_GenerateW2V(const XYZ_32 *pos, const XYZ_16 *rot);
 void Matrix_LookAt(
     int32_t xsrc, int32_t ysrc, int32_t zsrc, int32_t xtar, int32_t ytar,
     int32_t ztar, int16_t roll);
+// Moves the camera within its own axes: every point the view puts somewhere
+// is turned by the rotation and then shifted by the offset, which is in
+// world units. For a camera that is carried on something that moves, such as
+// the head of a player in VR.
+void Matrix_MoveW2V(const double rot[3][3], const double offset[3]);
+// Gives the view its exact form for a camera that stands at the given
+// place and looks along the given line, both in fractions of a unit. The
+// view in whole numbers stays as it was set, from the same camera rounded;
+// what is drawn takes the exact one, which does not jump as the rounding
+// falls one way and then the other from frame to frame.
+void Matrix_RefineW2V(const double pos[3], const double forward[3]);
 void Matrix_ScaleW2V(XYZ_32 scale);
 // Shears the view so that the middle of the camera's sight lands away from
 // the middle of the screen: every point moves across by kx and down by ky

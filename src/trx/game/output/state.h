@@ -6,6 +6,7 @@
 #include <trx/game/rooms.h>
 #include <trx/game/viewport.h>
 #include <trx/gl/api.h>
+#include <trx/vr/session.h>
 
 void Output_SetSkyboxEnabled(bool enabled);
 bool Output_IsSkyboxEnabled(void);
@@ -18,6 +19,14 @@ int16_t Output_GetVerticalHalfFOV(int16_t fov_angle, FOV_MODE fov_mode);
 
 void Output_GetPerspProjectionMatrix(GLfloat output[][4]);
 void Output_GetOrthoProjectionMatrix(GLfloat output[][4]);
+// How far from the camera something sits in the plane of the screen of a VR
+// headset, for what is drawn from here on. See VR_WORLD_CONVERGENCE.
+void Output_SetStereoDepth(float parallax, float convergence);
+float Output_GetStereoParallax(void);
+float Output_GetStereoConvergence(void);
+// The perspective projection of one eye of a VR headset, which sees further
+// to one side than to the other.
+void Output_GetEyeProjectionMatrix(GLfloat output[][4], const VR_EYE *eye);
 
 void Output_SetTime(float time);
 float Output_GetTime(void);

@@ -80,6 +80,18 @@ void Output_Overlay_DrawSnapshotSlot(int32_t slot, float opacity);
 // Gives a slot back. Its texture is kept for the next capture.
 void Output_Overlay_FreeSnapshotSlot(int32_t slot);
 void Output_Overlay_DrawSnapshotEx(const OUTPUT_SNAPSHOT_SETTINGS *settings);
+// Draws the level around a player in VR, where a background asked for it
+// while the interface was drawn. Called once the interface is flushed.
+void Output_Overlay_DrawWorldBackdrop(void);
+// Whether the level is around a player in VR in the frame being drawn for
+// the current eye: drawn already, or asked for behind a menu. The interface
+// is then on a panel inside the level, and otherwise on a screen.
+bool Output_Overlay_IsWorldAround(void);
+// Whether the level itself is behind the interface in the frame being drawn
+// for the current eye in VR, around the player or behind a menu on the
+// screen. Its depth then starts right behind the interface, which has to
+// keep in front of it.
+bool Output_Overlay_IsWorldBehind(void);
 void Output_Overlay_DrawBackground(
     BACKGROUND_TYPE style, float opacity, const char *image_path);
 // Report the tint and opacity for a background style.

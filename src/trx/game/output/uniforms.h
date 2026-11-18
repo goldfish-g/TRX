@@ -4,6 +4,7 @@
 #include <trx/game/matrix.h>
 #include <trx/game/rooms/types.h>
 #include <trx/gl/api.h>
+#include <trx/vr/session.h>
 
 typedef struct {
     int32_t ls_adder;
@@ -35,6 +36,13 @@ void Output_Uniforms_UploadGeneral(const OUTPUT_UNIFORMS *uniforms);
 void Output_Uniforms_UploadOrthoMatrix(const OUTPUT_UNIFORMS *uniforms);
 void Output_Uniforms_UploadViewMatrix(
     const OUTPUT_UNIFORMS *uniforms, const MATRIX *matrix);
+// Uploads the view of one eye of a VR headset: the given view, which is the
+// head's, moved to where the eye is, with the eye's own projection.
+void Output_Uniforms_UploadEyeMatrix(
+    const OUTPUT_UNIFORMS *uniforms, const MATRIX *matrix, const VR_EYE *eye);
+// Says that what is drawn next is too far away to have a place of its own,
+// such as the sky, and stays put around the camera.
+void Output_Uniforms_SetDistant(bool is_distant);
 void Output_Uniforms_UploadDynamicLights(const OUTPUT_UNIFORMS *uniforms);
 
 void Output_Uniforms_UploadFogDistance(

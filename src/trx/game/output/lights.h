@@ -69,5 +69,6 @@ void Output_TriggerFXFogBulb(
     XYZ_32 pos, int32_t fx_rad, int32_t density, RGB_888 color);
 // TR4 doubles the sun light and disables fog bulbs in the inventory.
 void Output_SetInventoryLightingMode(bool enabled);
+bool Output_IsInventoryLightingMode(void);
 
 void Output_AnimateLights(int32_t num_frames);

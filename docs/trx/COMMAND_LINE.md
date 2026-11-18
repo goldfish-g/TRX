@@ -56,6 +56,11 @@ Currently the following command line interface options are available:
   Keeps the game window hidden while a headset shows the game. For headsets
   that run the game themselves, which show the window as a second screen.
 
+- `--vr-involved`:  
+  Starts with the player inside the game, following Lara, where the headset
+  otherwise starts at the theater. Clicking both sticks in switches between
+  the two at any time.
+
 - `--headless-fps <num>`:  
   In headless mode, forces the simulation to run at a constant FPS. If omitted
   or zero, uses the FPS from the configuration.

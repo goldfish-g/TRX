@@ -21,6 +21,8 @@
 
 #include <math.h>
 
+static float m_StereoParallax = VR_SCREEN_PARALLAX;
+static float m_StereoConvergence = VR_WORLD_CONVERGENCE;
 static float m_Time = 0.0f;
 static float m_TimeInGame = 0.0f;
 static bool m_ControlFrame = false;
@@ -313,6 +315,44 @@ void Output_GetPerspProjectionMatrix(GLfloat output[][4])
     output[3][1] = 0.0f;
     output[3][2] = -res_z / (float)(1 << W2V_SHIFT);
     output[3][3] = 0.0f;
+
+    // Each eye of the theater gets the whole picture moved to its side, by
+    // as much as the two pictures put the far distance apart. Moving the
+    // camera the other way then brings what is at the screen's depth back
+    // to where it was, which is done where the view is uploaded.
+    const int32_t eye = VR_Session_GetDrawnEye();
+    if (eye >= 0) {
+        output[2][0] = (eye == 0 ? -1.0f : 1.0f) * m_StereoParallax;
+    }
+}
+
+void Output_SetStereoDepth(const float parallax, const float convergence)
+{
+    m_StereoParallax = parallax;
+    m_StereoConvergence = convergence;
+}
+
+float Output_GetStereoParallax(void)
+{
+    return m_StereoParallax;
+}
+
+float Output_GetStereoConvergence(void)
+{
+    return m_StereoConvergence;
+}
+
+void Output_GetEyeProjectionMatrix(GLfloat output[][4], const VR_EYE *const eye)
+{
+    // Depth is the same as for a screen. Only where the view ends on each
+    // side changes, and the view counts downwards where the eye counts up.
+    Output_GetPerspProjectionMatrix(output);
+    const float width = eye->tan_right - eye->tan_left;
+    const float height = eye->tan_up - eye->tan_down;
+    output[0][0] = 2.0f / width;
+    output[1][1] = -2.0f / height;
+    output[2][0] = -(eye->tan_right + eye->tan_left) / width;
+    output[2][1] = -(eye->tan_up + eye->tan_down) / height;
 }
 
 void Output_GetOrthoProjectionMatrix(GLfloat output[][4])
@@ -515,7 +555,14 @@ void Output_EnableScissor(
     // SDL window coordinates first.
 
     // To deal with precision issues coming from using integer matrix ops
-    const int32_t border = 4;
+    int32_t border = 4;
+    // The window is where the camera sees the room. On the screen of a VR
+    // headset each eye sees it a little to one side, and near things by the
+    // most, so the window is opened by as much as that can come to.
+    if (VR_Session_GetDrawnEye() >= 0) {
+        border += (int32_t)(4.0f * VR_SCREEN_PARALLAX
+                            * Viewport_GetWidth(VIEWPORT_GAME));
+    }
 
     const VIEWPORT_RECT game = Viewport_GetRect(VIEWPORT_GAME);
     const VIEWPORT_RECT window = Viewport_GetRect(VIEWPORT_GAME);
@@ -528,6 +575,11 @@ void Output_EnableScissor(
         .h = h * scale_y + border * 2,
     };
 
+    // The window is where the camera sees a room through a portal, which
+    // each eye of a VR headset sees somewhere else.
+    if (SceneCompositor_IsStereo()) {
+        return;
+    }
     glEnable(GL_SCISSOR_TEST);
     glScissor(scissor.x, scissor.y, scissor.w, scissor.h);
 }

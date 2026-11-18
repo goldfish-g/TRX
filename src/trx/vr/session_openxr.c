@@ -2,7 +2,9 @@
 #define _GNU_SOURCE
 
 #include <trx/core/log.h>
+#include <trx/core/utils.h>
 #include <trx/game/clock/const.h>
+#include <trx/gl/api.h>
 #include <trx/vr/gamepad_openxr.h>
 #include <trx/vr/session.h>
 
@@ -28,6 +30,28 @@
 // of the player it hangs.
 #define M_SCREEN_SIZE 3.2f
 #define M_SCREEN_DISTANCE 2.5f
+// The same for the panel that carries the interface while the player is
+// inside the game. It looks as large, and hangs nearer, where fewer walls
+// come between it and the player.
+// How much larger than the headset asks for each eye's picture is drawn, on
+// each side. The game's textures are coarse and its edges are not smoothed,
+// so the extra is what the headset has to make them steady with. The frame
+// is cheap enough to leave room for it.
+#define M_EYE_SCALE 1.3f
+// Scenes differ a great deal in what they cost to draw, so the eyes are
+// drawn into as much of their pictures as there is time for, between the
+// size the headset asks for and all of it. A frame whose drawing takes the
+// graphics card more than the upper share of the time a frame has makes the
+// next ones smaller at once; a run of frames under the lower share lets
+// them grow again, slowly, so that the size does not swing.
+#define M_EYE_SHARE_MIN (1.0f / M_EYE_SCALE)
+#define M_EYE_BUSY 0.64
+#define M_EYE_IDLE 0.52
+#define M_EYE_SHRINK 0.93f
+#define M_EYE_GROW 1.03f
+#define M_EYE_CALM_FRAMES 20
+#define M_PANEL_SIZE 1.8f
+#define M_PANEL_DISTANCE 1.4f
 
 #define M_MUST(call_, what_)                                                   \
     do {                                                                       \
@@ -36,6 +60,25 @@
             XR_FAILED(xr_result_), "%s: %s", (what_),                          \
             M_DescribeResult(xr_result_));                                     \
     } while (0)
+
+// A chain of pictures that the headset shows, and the framebuffer the one in
+// turn is drawn through.
+typedef struct {
+    XrSwapchain swapchain;
+    XrSwapchainImageOpenGLKHR images[M_MAX_IMAGES];
+    uint32_t image_count;
+    GLuint fbo;
+    GLuint depth;
+    int32_t width;
+    int32_t height;
+    // How much of the picture the frame that is open draws into.
+    int32_t used_width;
+    int32_t used_height;
+    // Whether the frame that is open holds a picture of the chain, and
+    // whether that picture was drawn and given back.
+    bool is_acquired;
+    bool is_drawn;
+} M_TARGET;
 
 typedef struct {
     XrInstance instance;
@@ -46,10 +89,12 @@ typedef struct {
     XrSpace local_space;
     XrSpace view_space;
     XrSpace space;
-    XrSwapchain swapchain;
-    XrSwapchainImageOpenGLKHR images[M_MAX_IMAGES];
-    uint32_t image_count;
-    GLuint fbo;
+    // What the game draws into: the screen, and the two eyes.
+    M_TARGET screens[2];
+    M_TARGET eyes[2];
+    VR_MODE mode;
+    int32_t theater_eye;
+    int64_t format;
 
     // Whether the headset takes frames at the moment.
     bool is_running;
@@ -63,10 +108,35 @@ typedef struct {
     bool has_presence;
     bool is_player_away;
     bool is_menu_dismissed;
-    // Whether the frame that is open has an image of the swapchain to give
-    // back.
-    bool has_image;
+    // Whether a frame is open, and whether the headset will show it.
+    bool is_frame_open;
+    bool should_render;
     XrTime display_time;
+    // Where the eyes are in the frame that is open, as the headset gives
+    // them and as the game takes them.
+    XrView xr_views[2];
+    VR_VIEW view;
+    bool has_view;
+    // The share of each side of the eyes' pictures that is drawn into, when
+    // the frame that is open began, how long a frame has, and for how many
+    // frames in a row there has been time to spare.
+    float eye_share;
+    Uint64 frame_start;
+    double frame_period;
+    int32_t calm_frames;
+    // Asks the graphics card how long it spent on a frame's drawing, which
+    // it answers a frame or two later.
+    GLuint timer;
+    bool is_timing;
+    bool has_timing;
+    double draw_time;
+    double draw_total;
+    int32_t draw_frames;
+    // How long the frames took to prepare and then to finish drawing, added
+    // up, to say in the log when the session ends.
+    double work_total;
+    double wait_total;
+    int32_t timed_frames;
 } M_PRIV;
 
 static M_PRIV m_Priv = {};
@@ -360,7 +430,116 @@ static void M_PickRefreshRate(void)
         XR_SUCCEEDED(result) ? "taken" : M_DescribeResult(result));
 }
 
-static RESULT M_CreateScreen(void)
+static RESULT M_CreateTarget(
+    M_TARGET *const target, const int32_t width, const int32_t height,
+    const bool has_depth)
+{
+    M_PRIV *const p = &m_Priv;
+    target->width = width;
+    target->height = height;
+    const XrSwapchainCreateInfo info = {
+        .type = XR_TYPE_SWAPCHAIN_CREATE_INFO,
+        .usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT
+            | XR_SWAPCHAIN_USAGE_SAMPLED_BIT,
+        .format = p->format,
+        .sampleCount = 1,
+        .width = width,
+        .height = height,
+        .faceCount = 1,
+        .arraySize = 1,
+        .mipCount = 1,
+    };
+    M_MUST(
+        xrCreateSwapchain(p->session, &info, &target->swapchain),
+        "the headset gives no pictures to draw into");
+    for (int32_t i = 0; i < M_MAX_IMAGES; i++) {
+        target->images[i].type = XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR;
+    }
+    M_MUST(
+        xrEnumerateSwapchainImages(
+            target->swapchain, M_MAX_IMAGES, &target->image_count,
+            (XrSwapchainImageBaseHeader *)target->images),
+        "the headset gives no pictures to draw into");
+
+    glGenFramebuffers(1, &target->fbo);
+    if (has_depth) {
+        // The headset is only handed the colors, so the depth the scene is
+        // drawn with stays the game's own.
+        glGenRenderbuffers(1, &target->depth);
+        glBindRenderbuffer(GL_RENDERBUFFER, target->depth);
+        glRenderbufferStorage(
+            GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+        glBindRenderbuffer(GL_RENDERBUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, target->fbo);
+        glFramebufferRenderbuffer(
+            GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER,
+            target->depth);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+    return OK;
+}
+
+static void M_DestroyTarget(M_TARGET *const target)
+{
+    if (target->fbo != 0) {
+        glDeleteFramebuffers(1, &target->fbo);
+    }
+    if (target->depth != 0) {
+        glDeleteRenderbuffers(1, &target->depth);
+    }
+    if (target->swapchain != XR_NULL_HANDLE) {
+        xrDestroySwapchain(target->swapchain);
+    }
+    *target = (M_TARGET) {};
+}
+
+// Takes the picture of the chain that is in turn and puts it behind the
+// framebuffer of the target.
+static bool M_AcquireTarget(M_TARGET *const target, VR_SCREEN *const out_screen)
+{
+    M_PRIV *const p = &m_Priv;
+    *out_screen = (VR_SCREEN) {};
+    if (!p->is_frame_open || !p->should_render || target->is_acquired
+        || target->is_drawn) {
+        return false;
+    }
+    uint32_t index = 0;
+    const XrSwapchainImageWaitInfo wait_info = {
+        .type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO,
+        .timeout = XR_INFINITE_DURATION,
+    };
+    if (XR_FAILED(
+            xrAcquireSwapchainImage(target->swapchain, nullptr, &index))) {
+        return false;
+    }
+    target->is_acquired = true;
+    if (XR_FAILED(xrWaitSwapchainImage(target->swapchain, &wait_info))) {
+        xrReleaseSwapchainImage(target->swapchain, nullptr);
+        target->is_acquired = false;
+        return false;
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, target->fbo);
+    glFramebufferTexture2D(
+        GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+        target->images[index].image, 0);
+    out_screen->fbo = target->fbo;
+    out_screen->width = target->used_width;
+    out_screen->height = target->used_height;
+    return true;
+}
+
+// Marks the picture as drawn. It is given back to the headset with the
+// others at the end of the frame, once the drawing of all of them is seen
+// through.
+static void M_ReleaseTarget(M_TARGET *const target)
+{
+    if (target->is_acquired) {
+        target->is_drawn = true;
+    }
+}
+
+static RESULT M_CreateTargets(void)
 {
     M_PRIV *const p = &m_Priv;
 
@@ -373,41 +552,103 @@ static RESULT M_CreateScreen(void)
     // The game draws colors as a display takes them, which is what the sRGB
     // format says of its texels. The runtime lists the formats it prefers
     // first, so that is what is left where it has no sRGB one.
-    int64_t format = formats[0];
+    p->format = formats[0];
     for (uint32_t i = 0; i < format_count; i++) {
         if (formats[i] == GL_SRGB8_ALPHA8) {
-            format = formats[i];
+            p->format = formats[i];
             break;
         }
     }
 
-    const XrSwapchainCreateInfo info = {
-        .type = XR_TYPE_SWAPCHAIN_CREATE_INFO,
-        .usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT
-            | XR_SWAPCHAIN_USAGE_SAMPLED_BIT,
-        .format = format,
-        .sampleCount = 1,
-        .width = M_SCREEN_WIDTH,
-        .height = M_SCREEN_HEIGHT,
-        .faceCount = 1,
-        .arraySize = 1,
-        .mipCount = 1,
+    XrViewConfigurationView config[2] = {
+        { .type = XR_TYPE_VIEW_CONFIGURATION_VIEW },
+        { .type = XR_TYPE_VIEW_CONFIGURATION_VIEW },
     };
+    uint32_t view_count = 0;
     M_MUST(
-        xrCreateSwapchain(p->session, &info, &p->swapchain),
-        "the headset gives no pictures to draw into");
-    for (int32_t i = 0; i < M_MAX_IMAGES; i++) {
-        p->images[i].type = XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR;
-    }
-    M_MUST(
-        xrEnumerateSwapchainImages(
-            p->swapchain, M_MAX_IMAGES, &p->image_count,
-            (XrSwapchainImageBaseHeader *)p->images),
-        "the headset gives no pictures to draw into");
+        xrEnumerateViewConfigurationViews(
+            p->instance, p->system_id,
+            XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 2, &view_count, config),
+        "the headset does not say how large its eyes are");
 
-    glGenFramebuffers(1, &p->fbo);
+    for (int32_t i = 0; i < 2; i++) {
+        MUST(M_CreateTarget(
+            &p->screens[i], M_SCREEN_WIDTH, M_SCREEN_HEIGHT, false));
+        MUST(M_CreateTarget(
+            &p->eyes[i],
+            (int32_t)(config[i].recommendedImageRectWidth * M_EYE_SCALE),
+            (int32_t)(config[i].recommendedImageRectHeight * M_EYE_SCALE),
+            true));
+    }
+    LOG_INFO(
+        "the headset is drawn at %dx%d an eye", p->eyes[0].width,
+        p->eyes[0].height);
     M_PickRefreshRate();
     return OK;
+}
+
+// Works out where the head and the eyes are when the frame that is open is
+// shown, in the space the screen hangs in.
+static void M_LocateViews(void)
+{
+    M_PRIV *const p = &m_Priv;
+    p->has_view = false;
+    XrViewState state = { .type = XR_TYPE_VIEW_STATE };
+    const XrViewLocateInfo info = {
+        .type = XR_TYPE_VIEW_LOCATE_INFO,
+        .viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
+        .displayTime = p->display_time,
+        .space = p->space,
+    };
+    p->xr_views[0] = (XrView) { .type = XR_TYPE_VIEW };
+    p->xr_views[1] = (XrView) { .type = XR_TYPE_VIEW };
+    uint32_t count = 0;
+    const XrViewStateFlags needed =
+        XR_VIEW_STATE_ORIENTATION_VALID_BIT | XR_VIEW_STATE_POSITION_VALID_BIT;
+    if (XR_FAILED(
+            xrLocateViews(p->session, &info, &state, 2, &count, p->xr_views))
+        || count != 2 || (state.viewStateFlags & needed) != needed) {
+        return;
+    }
+
+    // The head is between the eyes and looks the way they do.
+    const XrVector3f a = p->xr_views[0].pose.position;
+    const XrVector3f b = p->xr_views[1].pose.position;
+    const XrQuaternionf q = p->xr_views[0].pose.orientation;
+    VR_VIEW *const view = &p->view;
+    view->pos[0] = (a.x + b.x) / 2.0f;
+    view->pos[1] = (a.y + b.y) / 2.0f;
+    view->pos[2] = (a.z + b.z) / 2.0f;
+    view->rot[0][0] = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
+    view->rot[0][1] = 2.0f * (q.x * q.y - q.z * q.w);
+    view->rot[0][2] = 2.0f * (q.x * q.z + q.y * q.w);
+    view->rot[1][0] = 2.0f * (q.x * q.y + q.z * q.w);
+    view->rot[1][1] = 1.0f - 2.0f * (q.x * q.x + q.z * q.z);
+    view->rot[1][2] = 2.0f * (q.y * q.z - q.x * q.w);
+    view->rot[2][0] = 2.0f * (q.x * q.z - q.y * q.w);
+    view->rot[2][1] = 2.0f * (q.y * q.z + q.x * q.w);
+    view->rot[2][2] = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
+
+    for (int32_t i = 0; i < 2; i++) {
+        const XrVector3f eye = p->xr_views[i].pose.position;
+        const float d[3] = {
+            eye.x - view->pos[0],
+            eye.y - view->pos[1],
+            eye.z - view->pos[2],
+        };
+        // Into the axes of the head, which the rows of its rotation turn
+        // back to.
+        for (int32_t j = 0; j < 3; j++) {
+            view->eyes[i].offset[j] = view->rot[0][j] * d[0]
+                + view->rot[1][j] * d[1] + view->rot[2][j] * d[2];
+        }
+        const XrFovf fov = p->xr_views[i].fov;
+        view->eyes[i].tan_left = tanf(fov.angleLeft);
+        view->eyes[i].tan_right = tanf(fov.angleRight);
+        view->eyes[i].tan_up = tanf(fov.angleUp);
+        view->eyes[i].tan_down = tanf(fov.angleDown);
+    }
+    p->has_view = true;
 }
 
 static void M_HandleStateChange(const XrSessionState state)
@@ -488,6 +729,52 @@ static void M_PollEvents(void)
     }
 }
 
+// Takes the graphics card's answer on how long a frame's drawing took, once
+// it has one, and sets how much of the eyes' pictures the next frames draw
+// into. Waiting for the drawing says nothing about it: on the Steam Frame
+// the wait ends at the same point of every frame, busy or not.
+static void M_CollectDrawTime(void)
+{
+    M_PRIV *const p = &m_Priv;
+    if (!p->has_timing) {
+        return;
+    }
+    GLint is_ready = 0;
+    glGetQueryObjectiv(p->timer, GL_QUERY_RESULT_AVAILABLE, &is_ready);
+    if (!is_ready) {
+        return;
+    }
+    GLuint64 nanoseconds = 0;
+    glGetQueryObjectui64v(p->timer, GL_QUERY_RESULT, &nanoseconds);
+    p->has_timing = false;
+    // Single frames differ a good deal, by whether the game moved a tick on
+    // in them for one, and the size should follow what the scene costs, not
+    // each of them. So the times are evened out over a few frames.
+    const double draw_time = nanoseconds / 1e9;
+    p->draw_time =
+        p->draw_time <= 0.0 ? draw_time : p->draw_time * 0.9 + draw_time * 0.1;
+    p->draw_total += draw_time;
+    p->draw_frames++;
+    // Only frames that drew the eyes say something about their size.
+    if (!p->eyes[0].is_drawn || p->frame_period <= 0.0) {
+        return;
+    }
+    if (p->draw_time > p->frame_period * M_EYE_BUSY) {
+        p->eye_share = fmaxf(p->eye_share * M_EYE_SHRINK, M_EYE_SHARE_MIN);
+        p->calm_frames = 0;
+        // The evened-out time still tells of the larger size for a while,
+        // and would shrink it again and again for the one overrun.
+        p->draw_time *= M_EYE_SHRINK * M_EYE_SHRINK;
+    } else if (p->draw_time < p->frame_period * M_EYE_IDLE) {
+        if (++p->calm_frames >= M_EYE_CALM_FRAMES) {
+            p->eye_share = fminf(p->eye_share * M_EYE_GROW, 1.0f);
+            p->calm_frames = 0;
+        }
+    } else {
+        p->calm_frames = 0;
+    }
+}
+
 void VR_Session_PrepareSDL(void)
 {
     // The runtime shares the game's OpenGL context through X11.
@@ -503,12 +790,13 @@ RESULT VR_Session_Start(void *const window)
     if (VR_Session_IsActive()) {
         return OK;
     }
+    m_Priv.theater_eye = -1;
     RESULT result = M_CreateInstance();
     if (IS_OK(result)) {
         result = M_CreateSession(window);
     }
     if (IS_OK(result)) {
-        result = M_CreateScreen();
+        result = M_CreateTargets();
     }
     if (!IS_OK(result)) {
         VR_Session_Stop();
@@ -527,13 +815,27 @@ RESULT VR_Session_Start(void *const window)
 void VR_Session_Stop(void)
 {
     M_PRIV *const p = &m_Priv;
+    if (p->session != XR_NULL_HANDLE && p->eye_share > 0.0f) {
+        LOG_INFO(
+            "the eyes were last drawn at %d%% of their largest size; a "
+            "frame took %.1f ms to prepare, %.1f ms of the graphics card "
+            "and %.1f ms of waiting for it",
+            (int32_t)(p->eye_share * 100.0f),
+            1000.0 * p->work_total / MAX(p->timed_frames, 1),
+            1000.0 * p->draw_total / MAX(p->draw_frames, 1),
+            1000.0 * p->wait_total / MAX(p->timed_frames, 1));
+    }
     VR_Gamepad_Shutdown();
-    if (p->fbo != 0) {
-        glDeleteFramebuffers(1, &p->fbo);
+    if (p->timer != 0) {
+        if (p->is_timing) {
+            glEndQuery(GL_TIME_ELAPSED);
+        }
+        glDeleteQueries(1, &p->timer);
     }
-    if (p->swapchain != XR_NULL_HANDLE) {
-        xrDestroySwapchain(p->swapchain);
-    }
+    M_DestroyTarget(&p->screens[0]);
+    M_DestroyTarget(&p->screens[1]);
+    M_DestroyTarget(&p->eyes[0]);
+    M_DestroyTarget(&p->eyes[1]);
     if (p->space != XR_NULL_HANDLE) {
         xrDestroySpace(p->space);
     }
@@ -549,7 +851,7 @@ void VR_Session_Stop(void)
     if (p->instance != XR_NULL_HANDLE) {
         xrDestroyInstance(p->instance);
     }
-    *p = (M_PRIV) {};
+    *p = (M_PRIV) { .theater_eye = -1 };
 }
 
 void VR_Session_GetScreenSize(
@@ -579,12 +881,14 @@ void VR_Session_Recenter(void)
     m_Priv.needs_recenter = true;
 }
 
-bool VR_Session_BeginFrame(VR_SCREEN *const out_screen)
+bool VR_Session_BeginFrame(void)
 {
     M_PRIV *const p = &m_Priv;
-    *out_screen = (VR_SCREEN) {};
     if (!VR_Session_IsActive()) {
         return false;
+    }
+    if (p->is_frame_open) {
+        return true;
     }
     M_PollEvents();
     if (p->is_over) {
@@ -610,72 +914,238 @@ bool VR_Session_BeginFrame(VR_SCREEN *const out_screen)
         }
         return false;
     }
+    p->is_frame_open = true;
+    p->should_render = frame_state.shouldRender;
     p->display_time = frame_state.predictedDisplayTime;
-    p->has_image = false;
+    p->frame_start = SDL_GetPerformanceCounter();
+    p->frame_period = frame_state.predictedDisplayPeriod / 1e9;
+    if (p->eye_share <= 0.0f) {
+        p->eye_share = 1.0f;
+    }
+    M_CollectDrawTime();
+    if (p->should_render && !p->has_timing) {
+        if (p->timer == 0) {
+            glGenQueries(1, &p->timer);
+        }
+        glBeginQuery(GL_TIME_ELAPSED, p->timer);
+        p->is_timing = true;
+    }
+    for (int32_t i = 0; i < 2; i++) {
+        // Whole pixels, and an even number of them.
+        p->eyes[i].used_width = (int32_t)(p->eyes[i].width * p->eye_share) & ~1;
+        p->eyes[i].used_height =
+            (int32_t)(p->eyes[i].height * p->eye_share) & ~1;
+        p->screens[i].used_width = p->screens[i].width;
+        p->screens[i].used_height = p->screens[i].height;
+    }
+    p->has_view = false;
+    p->screens[0].is_drawn = false;
+    p->screens[1].is_drawn = false;
+    p->eyes[0].is_drawn = false;
+    p->eyes[1].is_drawn = false;
     VR_Gamepad_Update(p->session);
-    if (!frame_state.shouldRender) {
+    if (!p->should_render) {
         return true;
     }
     if (p->needs_recenter && M_Recenter(p->display_time)) {
         p->needs_recenter = false;
     }
-
-    uint32_t index = 0;
-    const XrSwapchainImageWaitInfo wait_info = {
-        .type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO,
-        .timeout = XR_INFINITE_DURATION,
-    };
-    if (XR_FAILED(xrAcquireSwapchainImage(p->swapchain, nullptr, &index))) {
-        return true;
-    }
-    p->has_image = true;
-    if (XR_FAILED(xrWaitSwapchainImage(p->swapchain, &wait_info))) {
-        return true;
-    }
-
-    glBindFramebuffer(GL_FRAMEBUFFER, p->fbo);
-    glFramebufferTexture2D(
-        GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-        p->images[index].image, 0);
-    out_screen->fbo = p->fbo;
-    out_screen->width = M_SCREEN_WIDTH;
-    out_screen->height = M_SCREEN_HEIGHT;
+    M_LocateViews();
     return true;
+}
+
+const VR_VIEW *VR_Session_GetView(void)
+{
+    const M_PRIV *const p = &m_Priv;
+    return p->is_frame_open && p->should_render && p->has_view ? &p->view
+                                                               : nullptr;
+}
+
+bool VR_Session_AcquireEye(const int32_t eye, VR_SCREEN *const out_screen)
+{
+    return M_AcquireTarget(&m_Priv.eyes[eye], out_screen);
+}
+
+void VR_Session_ReleaseEye(const int32_t eye)
+{
+    M_ReleaseTarget(&m_Priv.eyes[eye]);
+}
+
+bool VR_Session_IsEyeDrawn(const int32_t eye)
+{
+    const M_PRIV *const p = &m_Priv;
+    return p->is_frame_open
+        && (p->eyes[eye].is_drawn || p->eyes[eye].is_acquired);
+}
+
+bool VR_Session_HasEyes(void)
+{
+    const M_PRIV *const p = &m_Priv;
+    return p->is_frame_open && p->eyes[0].is_drawn && p->eyes[1].is_drawn;
+}
+
+bool VR_Session_AcquireScreen(const int32_t eye, VR_SCREEN *const out_screen)
+{
+    return M_AcquireTarget(&m_Priv.screens[eye], out_screen);
+}
+
+VR_MODE VR_Session_GetMode(void)
+{
+    return m_Priv.mode;
+}
+
+void VR_Session_ToggleMode(void)
+{
+    M_PRIV *const p = &m_Priv;
+    p->mode = p->mode == VR_MODE_THEATER ? VR_MODE_INVOLVED : VR_MODE_THEATER;
+    // Either way the player starts out looking straight at it.
+    p->needs_recenter = true;
+    LOG_INFO(
+        "the headset shows the game %s",
+        p->mode == VR_MODE_THEATER ? "on a screen" : "around the player");
+}
+
+bool VR_Session_IsStereo(void)
+{
+    const M_PRIV *const p = &m_Priv;
+    return VR_Session_IsActive() && p->is_running;
+}
+
+void VR_Session_SetDrawnEye(const int32_t eye)
+{
+    m_Priv.theater_eye = eye;
+}
+
+int32_t VR_Session_GetDrawnEye(void)
+{
+    return VR_Session_IsActive() ? m_Priv.theater_eye : -1;
 }
 
 void VR_Session_EndFrame(const float aspect_ratio)
 {
     M_PRIV *const p = &m_Priv;
-    if (p->has_image) {
-        xrReleaseSwapchainImage(p->swapchain, nullptr);
+    if (!p->is_frame_open) {
+        return;
     }
+    // The headset shows a picture from the moment it is given back, and
+    // the driver may still be drawing it: OpenGL only queues what it is told
+    // to draw. Shown early, a picture is partly the color it was cleared
+    // to, which flashes in an eye for a frame. So the drawing is seen
+    // through first, once for all the pictures of the frame, which lets the
+    // game prepare one while the last is still being drawn.
+    M_TARGET *const targets[] = {
+        &p->screens[0],
+        &p->screens[1],
+        &p->eyes[0],
+        &p->eyes[1],
+    };
+    bool is_any_acquired = false;
+    for (int32_t i = 0; i < 4; i++) {
+        is_any_acquired |= targets[i]->is_acquired;
+    }
+    if (p->is_timing) {
+        glEndQuery(GL_TIME_ELAPSED);
+        p->is_timing = false;
+        p->has_timing = true;
+    }
+    if (is_any_acquired) {
+        const Uint64 wait_start = SDL_GetPerformanceCounter();
+        // A fence is passed when everything before it is drawn, and waiting
+        // on it also sends off what was still queued.
+        const GLsync fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        glClientWaitSync(fence, GL_SYNC_FLUSH_COMMANDS_BIT, 100000000);
+        glDeleteSync(fence);
+        p->wait_total += (double)(SDL_GetPerformanceCounter() - wait_start)
+            / (double)SDL_GetPerformanceFrequency();
+        p->work_total += (double)(wait_start - p->frame_start)
+            / (double)SDL_GetPerformanceFrequency();
+        p->timed_frames++;
+    }
+    for (int32_t i = 0; i < 4; i++) {
+        if (targets[i]->is_acquired) {
+            xrReleaseSwapchainImage(targets[i]->swapchain, nullptr);
+            targets[i]->is_acquired = false;
+            targets[i]->is_drawn = true;
+        }
+    }
+    const bool has_eyes = p->eyes[0].is_drawn && p->eyes[1].is_drawn;
+    // A screen drawn for each eye has depth; one drawn once is flat, and
+    // both eyes are shown the same picture.
+    const bool has_depth = p->screens[0].is_drawn && p->screens[1].is_drawn;
 
-    const XrCompositionLayerQuad quad = {
-        .type = XR_TYPE_COMPOSITION_LAYER_QUAD,
-        .space = p->space,
-        .eyeVisibility = XR_EYE_VISIBILITY_BOTH,
-        .subImage = {
-            .swapchain = p->swapchain,
-            .imageRect = {
-                .extent = { M_SCREEN_WIDTH, M_SCREEN_HEIGHT },
+    XrCompositionLayerProjectionView eye_views[2] = {};
+    for (int32_t i = 0; i < 2; i++) {
+        eye_views[i] = (XrCompositionLayerProjectionView) {
+            .type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW,
+            .pose = p->xr_views[i].pose,
+            .fov = p->xr_views[i].fov,
+            .subImage = {
+                .swapchain = p->eyes[i].swapchain,
+                .imageRect = {
+                    .extent = {
+                        p->eyes[i].used_width,
+                        p->eyes[i].used_height,
+                    },
+                },
             },
-        },
-        .pose = {
-            .orientation = { .w = 1.0f },
-            .position = { .z = -M_SCREEN_DISTANCE },
-        },
-        .size = { M_SCREEN_SIZE, M_SCREEN_SIZE / aspect_ratio },
+        };
+    }
+    const XrCompositionLayerProjection projection = {
+        .type = XR_TYPE_COMPOSITION_LAYER_PROJECTION,
+        .space = p->space,
+        .viewCount = 2,
+        .views = eye_views,
     };
-    const XrCompositionLayerBaseHeader *const layers[] = {
-        (const XrCompositionLayerBaseHeader *)&quad,
-    };
+    XrCompositionLayerQuad quads[2];
+    for (int32_t i = 0; i < 2; i++) {
+        quads[i] = (XrCompositionLayerQuad) {
+            .type = XR_TYPE_COMPOSITION_LAYER_QUAD,
+            // Over the scene the screen only carries the interface, and
+            // lets the scene through where the interface leaves it clear.
+            .layerFlags = has_eyes
+                ? XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT
+                : 0,
+            .space = p->space,
+            .eyeVisibility = !has_depth ? XR_EYE_VISIBILITY_BOTH
+                : i == 0 ? XR_EYE_VISIBILITY_LEFT
+                         : XR_EYE_VISIBILITY_RIGHT,
+            .subImage = {
+                .swapchain = p->screens[i].swapchain,
+                .imageRect = {
+                    .extent = { p->screens[i].width, p->screens[i].height },
+                },
+            },
+            .pose = {
+                .orientation = { .w = 1.0f },
+                .position = {
+                    .z = has_eyes ? -M_PANEL_DISTANCE : -M_SCREEN_DISTANCE,
+                },
+            },
+            .size = {
+                has_eyes ? M_PANEL_SIZE : M_SCREEN_SIZE,
+                (has_eyes ? M_PANEL_SIZE : M_SCREEN_SIZE) / aspect_ratio,
+            },
+        };
+    }
+    const XrCompositionLayerBaseHeader *layers[3];
+    uint32_t layer_count = 0;
+    if (has_eyes) {
+        layers[layer_count++] =
+            (const XrCompositionLayerBaseHeader *)&projection;
+    }
+    if (p->screens[0].is_drawn) {
+        layers[layer_count++] = (const XrCompositionLayerBaseHeader *)&quads[0];
+    }
+    if (has_depth) {
+        layers[layer_count++] = (const XrCompositionLayerBaseHeader *)&quads[1];
+    }
     const XrFrameEndInfo info = {
         .type = XR_TYPE_FRAME_END_INFO,
         .displayTime = p->display_time,
         .environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE,
-        .layerCount = p->has_image ? 1 : 0,
+        .layerCount = layer_count,
         .layers = layers,
     };
     xrEndFrame(p->session, &info);
-    p->has_image = false;
+    p->is_frame_open = false;
 }
