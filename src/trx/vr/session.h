@@ -124,6 +124,12 @@ bool VR_Session_BeginFrame(void);
 // where the headset does not know or will not show the frame.
 const VR_VIEW *VR_Session_GetView(void);
 
+// The parts of one eye's picture that its lens never shows, as triangles:
+// two numbers to a corner, three corners to a triangle, with the picture
+// reaching from -1 to 1 either way and counting upwards. Returns how many
+// corners there are, which is none where the headset does not say.
+int32_t VR_Session_GetHiddenArea(int32_t eye, const float **out_corners);
+
 // Hands out the framebuffer one eye's view of the scene is drawn into, with a
 // depth buffer of its own, and takes it back once drawn. Returns false where
 // the headset will not show the frame.

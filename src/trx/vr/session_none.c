@@ -96,6 +96,12 @@ int32_t VR_Session_GetDrawnEye(void)
     return -1;
 }
 
+int32_t VR_Session_GetHiddenArea(
+    const int32_t eye, const float **const out_corners)
+{
+    return 0;
+}
+
 void VR_Session_EndFrame(const float aspect_ratio)
 {
 }

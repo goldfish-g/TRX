@@ -106,6 +106,7 @@ typedef struct {
     bool is_steamvr;
     bool has_refresh_rates;
     bool has_presence;
+    bool has_hidden_areas;
     bool is_player_away;
     bool is_menu_dismissed;
     // Whether a frame is open, and whether the headset will show it.
@@ -117,6 +118,13 @@ typedef struct {
     XrView xr_views[2];
     VR_VIEW view;
     bool has_view;
+    // The parts of the eyes' pictures that the lenses never show, which are
+    // asked for when first needed.
+    struct {
+        bool is_known;
+        int32_t corner_count;
+        float *corners;
+    } hidden_areas[2];
     // The share of each side of the eyes' pictures that is drawn into, when
     // the frame that is open began, how long a frame has, and for how many
     // frames in a row there has been time to spare.
@@ -212,12 +220,16 @@ static RESULT M_CreateInstance(void)
     M_PRIV *const p = &m_Priv;
     // The controllers of the Steam Frame are a kind of their own, which only
     // a runtime that knows them takes bindings for.
-    const char *extensions[4] = { XR_KHR_OPENGL_ENABLE_EXTENSION_NAME };
+    const char *extensions[6] = { XR_KHR_OPENGL_ENABLE_EXTENSION_NAME };
     uint32_t extension_count = 1;
     // Lets the headset say when the player takes it off.
     p->has_presence = M_HasExtension(XR_EXT_USER_PRESENCE_EXTENSION_NAME);
     if (p->has_presence) {
         extensions[extension_count++] = XR_EXT_USER_PRESENCE_EXTENSION_NAME;
+    }
+    p->has_hidden_areas = M_HasExtension(XR_KHR_VISIBILITY_MASK_EXTENSION_NAME);
+    if (p->has_hidden_areas) {
+        extensions[extension_count++] = XR_KHR_VISIBILITY_MASK_EXTENSION_NAME;
     }
     p->has_refresh_rates =
         M_HasExtension(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
@@ -718,6 +730,12 @@ static void M_PollEvents(void)
             // space the screen hangs in. The screen follows to where the
             // player looks now.
             p->needs_recenter = true;
+        } else if (
+            event.type == XR_TYPE_EVENT_DATA_VISIBILITY_MASK_CHANGED_KHR) {
+            // What the lenses show changed, as it does when the player sets
+            // how far apart they are. It is asked for again when needed.
+            p->hidden_areas[0].is_known = false;
+            p->hidden_areas[1].is_known = false;
         } else if (event.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING) {
             LOG_WARNING(
                 "the OpenXR runtime is gone, and the game stays in its "
@@ -851,6 +869,8 @@ void VR_Session_Stop(void)
     if (p->instance != XR_NULL_HANDLE) {
         xrDestroyInstance(p->instance);
     }
+    free(p->hidden_areas[0].corners);
+    free(p->hidden_areas[1].corners);
     *p = (M_PRIV) { .theater_eye = -1 };
 }
 
@@ -959,6 +979,71 @@ const VR_VIEW *VR_Session_GetView(void)
     const M_PRIV *const p = &m_Priv;
     return p->is_frame_open && p->should_render && p->has_view ? &p->view
                                                                : nullptr;
+}
+
+static void M_FetchHiddenArea(const int32_t eye)
+{
+    M_PRIV *const p = &m_Priv;
+    p->hidden_areas[eye].is_known = true;
+    p->hidden_areas[eye].corner_count = 0;
+    XrResult (*get_mask)(
+        XrSession, XrViewConfigurationType, uint32_t, XrVisibilityMaskTypeKHR,
+        XrVisibilityMaskKHR *) = nullptr;
+    if (!p->has_hidden_areas
+        || XR_FAILED(xrGetInstanceProcAddr(
+            p->instance, "xrGetVisibilityMaskKHR",
+            (PFN_xrVoidFunction *)&get_mask))) {
+        return;
+    }
+
+    const XrViewConfigurationType type =
+        XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+    const XrVisibilityMaskTypeKHR kind =
+        XR_VISIBILITY_MASK_TYPE_HIDDEN_TRIANGLE_MESH_KHR;
+    XrVisibilityMaskKHR mask = { .type = XR_TYPE_VISIBILITY_MASK_KHR };
+    if (XR_FAILED(get_mask(p->session, type, eye, kind, &mask))
+        || mask.vertexCountOutput == 0 || mask.indexCountOutput == 0) {
+        return;
+    }
+    mask.vertexCapacityInput = mask.vertexCountOutput;
+    mask.indexCapacityInput = mask.indexCountOutput;
+    mask.vertices = calloc(mask.vertexCountOutput, sizeof(XrVector2f));
+    mask.indices = calloc(mask.indexCountOutput, sizeof(uint32_t));
+    if (XR_SUCCEEDED(get_mask(p->session, type, eye, kind, &mask))) {
+        // The headset gives the corners as the eye sees them, a unit ahead
+        // of it. The picture spans what the eye sees to each side.
+        const VR_EYE *const view = &p->view.eyes[eye];
+        const float width = view->tan_right - view->tan_left;
+        const float height = view->tan_up - view->tan_down;
+        float *const corners = realloc(
+            p->hidden_areas[eye].corners,
+            mask.indexCountOutput * 2 * sizeof(float));
+        for (uint32_t i = 0; i < mask.indexCountOutput; i++) {
+            const XrVector2f v = mask.vertices[mask.indices[i]];
+            corners[i * 2] =
+                (2.0f * v.x - view->tan_right - view->tan_left) / width;
+            corners[i * 2 + 1] =
+                (2.0f * v.y - view->tan_up - view->tan_down) / height;
+        }
+        p->hidden_areas[eye].corners = corners;
+        p->hidden_areas[eye].corner_count = mask.indexCountOutput;
+    }
+    free(mask.vertices);
+    free(mask.indices);
+}
+
+int32_t VR_Session_GetHiddenArea(
+    const int32_t eye, const float **const out_corners)
+{
+    M_PRIV *const p = &m_Priv;
+    if (!p->has_view) {
+        return 0;
+    }
+    if (!p->hidden_areas[eye].is_known) {
+        M_FetchHiddenArea(eye);
+    }
+    *out_corners = p->hidden_areas[eye].corners;
+    return p->hidden_areas[eye].corner_count;
 }
 
 bool VR_Session_AcquireEye(const int32_t eye, VR_SCREEN *const out_screen)

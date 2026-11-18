@@ -55,6 +55,16 @@ typedef struct {
     bool has_eye;
     struct {
         GLuint program;
+        GLuint vao;
+        GLuint buffer;
+        // Which eye's corners the buffer holds, and where they were read
+        // from, to tell when they change.
+        int32_t eye;
+        const float *corners;
+        int32_t corner_count;
+    } hider;
+    struct {
+        GLuint program;
         GLuint texture;
         GLuint vao;
         GLint loc_amount;
@@ -201,9 +211,113 @@ static void M_RenderWorldPasses(const M_PRIV *const p)
     }
 }
 
+// Marks the parts of the eye's picture that its lens never shows as being
+// right in front of the eye, so that nothing of the world is drawn there.
+// The player cannot see them, and they are a good share of the picture. The
+// eye's framebuffer is bound when this is called, with its depth just
+// cleared.
+static void M_HideUnseenParts(M_PRIV *const p)
+{
+    const float *corners = nullptr;
+    const int32_t corner_count = VR_Session_GetHiddenArea(p->eye, &corners);
+    if (corner_count == 0) {
+        return;
+    }
+
+    if (p->hider.program == 0) {
+        const char *const vertex = TRX_GL_SHADER_PRELUDE
+            "layout(location = 0) in vec2 inPos;\n"
+            "void main() {\n"
+            "    gl_Position = vec4(inPos, -1.0, 1.0);\n"
+            "}\n";
+        const char *const fragment = TRX_GL_SHADER_PRELUDE
+            "out vec4 outColor;\n"
+            "void main() {\n"
+            "    outColor = vec4(0.0, 0.0, 0.0, 1.0);\n"
+            "}\n";
+        const GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+        glShaderSource(vs, 1, &vertex, nullptr);
+        glCompileShader(vs);
+        const GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+        glShaderSource(fs, 1, &fragment, nullptr);
+        glCompileShader(fs);
+        p->hider.program = glCreateProgram();
+        glAttachShader(p->hider.program, vs);
+        glAttachShader(p->hider.program, fs);
+        glLinkProgram(p->hider.program);
+        glDeleteShader(vs);
+        glDeleteShader(fs);
+        glGenVertexArrays(1, &p->hider.vao);
+        glGenBuffers(1, &p->hider.buffer);
+        p->hider.eye = -1;
+    }
+
+    // The rest of the renderer keeps track of what it has bound, and must
+    // find all of it as it left it.
+    GLint old_program = 0;
+    GLint old_vao = 0;
+    GLint old_buffer = 0;
+    GLint old_depth_func = GL_LESS;
+    GLint old_polygon_mode[2] = { GL_FILL, GL_FILL };
+    GLboolean old_depth_mask = GL_TRUE;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &old_program);
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &old_vao);
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &old_buffer);
+    glGetIntegerv(GL_DEPTH_FUNC, &old_depth_func);
+    glGetIntegerv(GL_POLYGON_MODE, old_polygon_mode);
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &old_depth_mask);
+    const GLboolean had_depth_test = glIsEnabled(GL_DEPTH_TEST);
+    const GLboolean had_blend = glIsEnabled(GL_BLEND);
+    const GLboolean had_cull_face = glIsEnabled(GL_CULL_FACE);
+    const GLboolean had_scissor = glIsEnabled(GL_SCISSOR_TEST);
+
+    glBindVertexArray(p->hider.vao);
+    glBindBuffer(GL_ARRAY_BUFFER, p->hider.buffer);
+    if (p->hider.eye != p->eye || p->hider.corners != corners
+        || p->hider.corner_count != corner_count) {
+        glBufferData(
+            GL_ARRAY_BUFFER, corner_count * 2 * sizeof(float), corners,
+            GL_DYNAMIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+        p->hider.eye = p->eye;
+        p->hider.corners = corners;
+        p->hider.corner_count = corner_count;
+    }
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_ALWAYS);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_SCISSOR_TEST);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    glUseProgram(p->hider.program);
+    glDrawArrays(GL_TRIANGLES, 0, corner_count);
+
+    glBindBuffer(GL_ARRAY_BUFFER, (GLuint)old_buffer);
+    glBindVertexArray((GLuint)old_vao);
+    glUseProgram((GLuint)old_program);
+    glPolygonMode(GL_FRONT_AND_BACK, (GLenum)old_polygon_mode[0]);
+    glDepthFunc((GLenum)old_depth_func);
+    glDepthMask(old_depth_mask);
+    if (!had_depth_test) {
+        glDisable(GL_DEPTH_TEST);
+    }
+    if (had_blend) {
+        glEnable(GL_BLEND);
+    }
+    if (had_cull_face) {
+        glEnable(GL_CULL_FACE);
+    }
+    if (had_scissor) {
+        glEnable(GL_SCISSOR_TEST);
+    }
+}
+
 // Draws the world for the eye the frame is drawn for, as that eye sees it
 // from the player's head.
-static void M_RenderWorldToEye(const M_PRIV *const p)
+static void M_RenderWorldToEye(M_PRIV *const p)
 {
     const VR_VIEW *const head = VR_Session_GetView();
     ASSERT(head != nullptr);
@@ -221,6 +335,7 @@ static void M_RenderWorldToEye(const M_PRIV *const p)
     M_RenderWorldPasses(p);
     // Each flush stands in front of the last, as on a screen.
     glClear(GL_DEPTH_BUFFER_BIT);
+    M_HideUnseenParts(p);
     TRX_GL_Renderer_BindGeometryFbo();
     TRX_GL_Context_SwitchToViewport(VIEWPORT_GAME);
 }
@@ -247,7 +362,7 @@ static void M_RenderOverlayPass(const M_PRIV *const p)
     glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
 }
 
-static void M_RenderScenePasses(const M_PRIV *const p)
+static void M_RenderScenePasses(M_PRIV *const p)
 {
     if (!M_IsAnySourceDirty(p)) {
         return;
@@ -467,9 +582,10 @@ void SceneCompositor_BeginWorld(void)
     glViewport(0, 0, p->eye_target.width, p->eye_target.height);
     glClearBufferfv(GL_COLOR, 0, &background.r);
     glClear(GL_DEPTH_BUFFER_BIT);
+    p->eye = eye;
+    M_HideUnseenParts(p);
     TRX_GL_Renderer_BindGeometryFbo();
     TRX_GL_Context_SwitchToViewport(VIEWPORT_GAME);
-    p->eye = eye;
     p->is_stereo = true;
 }
 
