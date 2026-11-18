@@ -175,6 +175,35 @@ RUN mkdir -p /ext/lib \
     && make install
 RUN sed -i "s/Cflags: .*/\\0 -DGLEW_STATIC /" /ext/lib/pkgconfig/glew.pc
 
+# OpenXR loader
+FROM base AS openxr
+RUN apt-get install -y \
+    cmake \
+    gcc \
+    g++ \
+    libgl1-mesa-dev \
+    libx11-dev \
+    libxrandr-dev \
+    libxxf86vm-dev \
+    python3
+RUN git clone --depth 1 --branch release-1.1.36 \
+    https://github.com/KhronosGroup/OpenXR-SDK
+RUN cd OpenXR-SDK \
+    && cmake -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/ext \
+        -DCMAKE_INSTALL_LIBDIR=lib \
+        -DDYNAMIC_LOADER=OFF \
+        -DBUILD_TESTS=OFF \
+        -DBUILD_API_LAYERS=OFF \
+        -DBUILD_CONFORMANCE_TESTS=OFF \
+    && cmake --build build -j 4 \
+    && cmake --install build
+# the loader is written in C++, which whoever links the static library has to
+# be told about
+RUN sed -i '/^Libs.private:/d' /ext/lib/pkgconfig/openxr.pc \
+    && echo 'Libs.private: -lstdc++ -lm -ldl -lpthread' >> /ext/lib/pkgconfig/openxr.pc
+
 ## Lua
 FROM base AS lua
 RUN apt-get update && apt-get install -y wget build-essential libreadline-dev
@@ -231,6 +260,7 @@ COPY --from=sdl /ext/ /ext/
 COPY --from=backtrace /ext/ /ext/
 COPY --from=pcre2 /ext/ /ext/
 COPY --from=glew /ext/ /ext/
+COPY --from=openxr /ext/ /ext/
 
 ENV PYTHONPATH=/app/tools/
 ENV CCACHE_BASEDIR=/app/
